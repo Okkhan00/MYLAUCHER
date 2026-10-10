@@ -69,6 +69,7 @@ internal object PrefKeys {
     val SEARCH_CUSTOM_URL = stringPreferencesKey("search_custom_url")
     val SEARCH_SHORTCUTS = booleanPreferencesKey("search_settings_shortcuts")
     val DRAWER_BY_CATEGORY = booleanPreferencesKey("drawer_group_by_category")
+    val SHOW_RECENT_APPS = booleanPreferencesKey("show_recent_apps")
     val CATEGORY_OVERRIDES = stringPreferencesKey("category_overrides")
     val CATEGORY_CONFIG = stringPreferencesKey("category_config")
     val LAUNCH_LOG = stringPreferencesKey("launch_log")
@@ -159,6 +160,7 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
             customSearchUrl = p[PrefKeys.SEARCH_CUSTOM_URL] ?: d.customSearchUrl,
             searchSettingsShortcuts = p[PrefKeys.SEARCH_SHORTCUTS] ?: d.searchSettingsShortcuts,
             groupDrawerByCategory = p[PrefKeys.DRAWER_BY_CATEGORY] ?: d.groupDrawerByCategory,
+            showRecentApps = p[PrefKeys.SHOW_RECENT_APPS] ?: d.showRecentApps,
         )
     }
 
@@ -438,6 +440,7 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
             p[PrefKeys.SEARCH_CUSTOM_URL] = s.customSearchUrl.trim().take(300)
             p[PrefKeys.SEARCH_SHORTCUTS] = s.searchSettingsShortcuts
             p[PrefKeys.DRAWER_BY_CATEGORY] = s.groupDrawerByCategory
+            p[PrefKeys.SHOW_RECENT_APPS] = s.showRecentApps
         }
     }
 
