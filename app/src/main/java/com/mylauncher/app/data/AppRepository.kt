@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.os.Build
 import android.util.LruCache
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
@@ -82,10 +83,31 @@ class AppRepository(context: Context) {
     private val snapshotFile = File(appContext.cacheDir, SNAPSHOT_FILE)
     private val snapshotLock = Any()
 
+    /**
+     * Bumped when an installed app's icon may have changed (an update), so icons already on screen reload.
+     * A Compose state read only inside AppIcon, so nothing recomposes unless this actually changes.
+     */
+    val iconEpoch = mutableIntStateOf(0)
+
+    /** Package-change sequence from Android, so a resume check only looks at what changed since last time. */
+    private var changeSequence = -1
+    private val changeLock = Any()
+
     private val packageReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val pkg = intent?.data?.schemeSpecificPart
-            if (pkg.isNullOrEmpty()) scheduleRefresh() else packageMayHaveChanged(pkg)
+            if (pkg.isNullOrEmpty()) {
+                scheduleRefresh()
+                return
+            }
+            when (PackageEvents.plan(intent?.action, intent?.getBooleanExtra(Intent.EXTRA_REPLACING, false) ?: false)) {
+                PackageEvents.Plan.IGNORE -> Unit
+                PackageEvents.Plan.REFRESH -> packageMayHaveChanged(pkg)
+                PackageEvents.Plan.REFRESH_AND_VERIFY -> {
+                    packageMayHaveChanged(pkg)
+                    verifyLater(pkg)
+                }
+            }
         }
     }
 
@@ -95,15 +117,70 @@ class AppRepository(context: Context) {
             addAction(Intent.ACTION_PACKAGE_REMOVED)
             addAction(Intent.ACTION_PACKAGE_CHANGED)
             addAction(Intent.ACTION_PACKAGE_REPLACED)
+            addAction(Intent.ACTION_PACKAGE_FULLY_REMOVED)
             addDataScheme("package")
         }
         try {
-            ContextCompat.registerReceiver(appContext, packageReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+            // These are protected system broadcasts (only Android can send them), so the receiver is registered as
+            // exported: that is the flag that reliably receives system broadcasts on every Android version.
+            ContextCompat.registerReceiver(appContext, packageReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
         } catch (e: Exception) {
             // The list still loads once; it just won't live-refresh.
         }
         loadSnapshot()
         scheduleRefresh(0L)
+        scope.launch(Dispatchers.IO) { rememberChangeSequence() }
+    }
+
+    /** One more look at a package a few seconds after it was added or updated (single-package query, cheap). */
+    private fun verifyLater(packageName: String) {
+        scope.launch {
+            delay(VERIFY_DELAY_MS)
+            packageMayHaveChanged(packageName, immediate = true)
+        }
+    }
+
+    private fun rememberChangeSequence() {
+        synchronized(changeLock) {
+            // Asking from 0 returns the latest sequence number; everything before it is already in the full query.
+            val seq = try {
+                pm.getChangedPackages(0)?.sequenceNumber
+            } catch (e: Exception) {
+                null
+            }
+            if (seq != null && changeSequence < 0) changeSequence = seq
+        }
+    }
+
+    /**
+     * Called when the launcher comes back to the front. Asks Android which packages changed since the last
+     * check (one cheap call) and re-reads only those, so an install, update or removal that happened while
+     * the launcher was in the background is picked up even if its broadcast was missed. Does nothing when
+     * nothing changed.
+     */
+    fun refreshIfChanged() {
+        scope.launch(Dispatchers.IO) {
+            val changed = synchronized(changeLock) {
+                if (changeSequence < 0) {
+                    null
+                } else {
+                    val result = try {
+                        pm.getChangedPackages(changeSequence)
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (result != null) changeSequence = result.sequenceNumber
+                    result?.packageNames
+                }
+            }
+            if (changed == null) {
+                if (changeSequence < 0) rememberChangeSequence()
+                return@launch
+            }
+            if (changed.isEmpty()) return@launch
+            if (changed.size > MAX_INCREMENTAL_PACKAGES) scheduleRefresh(0L)
+            else changed.forEach { packageMayHaveChanged(it, immediate = true) }
+        }
     }
 
     /** Applies a performance mode: icon cache size and how long package broadcasts are debounced. */
@@ -155,7 +232,9 @@ class AppRepository(context: Context) {
 
     private fun publish(next: List<AppInfo>, changedPackages: List<String>, fullQuery: Boolean) {
         // Icons of changed packages may have changed (app update); everything else stays cached.
-        changedPackages.forEach { iconCache.remove(it) }
+        var iconDropped = false
+        changedPackages.forEach { if (iconCache.remove(it) != null) iconDropped = true }
+        if (iconDropped) iconEpoch.intValue++ // icons on screen reload (an updated app may have a new icon)
         if (fullQuery) {
             val present = next.mapTo(HashSet()) { it.packageName }
             iconCache.snapshot().keys.filterNot { it in present }.forEach { iconCache.remove(it) }
@@ -308,6 +387,7 @@ class AppRepository(context: Context) {
         const val MAX_ICON_PX = 192
         const val REFRESH_DEBOUNCE_MS = 300L
         const val PREFETCH_DELAY_MS = 200L
+        const val VERIFY_DELAY_MS = 3_000L
         const val MAX_INCREMENTAL_PACKAGES = 12
         const val SNAPSHOT_FILE = "app-list-v1.txt"
 
