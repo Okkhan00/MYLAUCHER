@@ -24,7 +24,7 @@ object BackupSchema {
         "protect_settings" to BackupType.BOOLEAN, "protect_hidden" to BackupType.BOOLEAN,
         "smart_suggestions" to BackupType.BOOLEAN, "search_web_enabled" to BackupType.BOOLEAN,
         "search_engine" to BackupType.STRING, "search_custom_url" to BackupType.STRING,
-        "search_settings_shortcuts" to BackupType.BOOLEAN, "drawer_group_by_category" to BackupType.BOOLEAN,
+        "search_settings_shortcuts" to BackupType.BOOLEAN, "drawer_group_by_category" to BackupType.BOOLEAN, "show_recent_apps" to BackupType.BOOLEAN,
         "category_overrides" to BackupType.STRING, "category_config" to BackupType.STRING,
         "theme_dynamic_color" to BackupType.BOOLEAN, "theme_accent_color" to BackupType.INT,
         "theme_surface_style" to BackupType.STRING, "theme_text_scale" to BackupType.STRING,
