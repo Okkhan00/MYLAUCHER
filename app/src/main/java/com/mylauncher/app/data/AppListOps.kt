@@ -28,6 +28,35 @@ object AppListOps {
 }
 
 /**
+ * Decides what a package broadcast should trigger. Pure so it can be unit tested without Android.
+ */
+object PackageEvents {
+    enum class Plan {
+        /** Nothing to do (for example the "removed" half of an app update, which is followed by "added"). */
+        IGNORE,
+
+        /** Re-check just this package. */
+        REFRESH,
+
+        /** Re-check now, and once more shortly after: Android may not have finished registering a new app. */
+        REFRESH_AND_VERIFY,
+    }
+
+    const val ADDED = "android.intent.action.PACKAGE_ADDED"
+    const val REMOVED = "android.intent.action.PACKAGE_REMOVED"
+    const val FULLY_REMOVED = "android.intent.action.PACKAGE_FULLY_REMOVED"
+    const val CHANGED = "android.intent.action.PACKAGE_CHANGED"
+    const val REPLACED = "android.intent.action.PACKAGE_REPLACED"
+
+    fun plan(action: String?, replacing: Boolean): Plan = when (action) {
+        ADDED, REPLACED -> Plan.REFRESH_AND_VERIFY
+        REMOVED -> if (replacing) Plan.IGNORE else Plan.REFRESH
+        FULLY_REMOVED, CHANGED -> Plan.REFRESH
+        else -> Plan.IGNORE
+    }
+}
+
+/**
  * Tiny text format for the on-disk copy of the app list, used to show apps instantly at startup
  * while the real PackageManager query runs. A bad or old file simply decodes to an empty list.
  */
