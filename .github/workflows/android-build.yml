@@ -1,3 +1,4 @@
+
 name: Android Build
 
 on:
@@ -18,6 +19,8 @@ jobs:
       # ---------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # ---------------------------------------------------------
       # Java 17
@@ -26,57 +29,46 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: "17"
 
       # ---------------------------------------------------------
       # Android SDK
-      # GitHub runner already contains Android SDK.
-      # We manually locate sdkmanager instead of using
-      # android-actions/setup-android because it was failing
-      # with the obsolete "tools" package.
       # ---------------------------------------------------------
       - name: Configure Android SDK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           export ANDROID_HOME=/usr/local/lib/android/sdk
-          export ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
 
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
 
           echo "Searching for sdkmanager..."
 
           SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" \
-            -type f \
-            -name sdkmanager \
-            -print \
-            -quit)
+            -type f -name sdkmanager -print -quit 2>/dev/null || true)
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager was not found."
-            echo "Available cmdline-tools:"
-            find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -type f -print || true
+            echo "ERROR: sdkmanager not found."
+            find "$ANDROID_HOME" -maxdepth 4 -type f \
+              -name sdkmanager -print || true
             exit 1
           fi
 
-          echo "Found sdkmanager:"
-          echo "$SDKMANAGER"
+          echo "Found: $SDKMANAGER"
 
           SDKMANAGER_DIR="$(dirname "$SDKMANAGER")"
-
-          echo "SDKMANAGER_DIR=$SDKMANAGER_DIR"
-
           echo "$SDKMANAGER_DIR" >> "$GITHUB_PATH"
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
 
           "$SDKMANAGER" --version
 
           echo "Accepting Android SDK licenses..."
-
+          set +o pipefail
           yes | "$SDKMANAGER" --licenses || true
+          set -o pipefail
 
           echo "Installing required Android SDK packages..."
 
@@ -101,7 +93,7 @@ jobs:
       - name: Ensure Gradle wrapper
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
             echo "Gradle wrapper JAR not found."
@@ -134,29 +126,26 @@ jobs:
         continue-on-error: true
 
       # ---------------------------------------------------------
-      # Prepare APK for Release
+      # Prepare APK
       # ---------------------------------------------------------
       - name: Prepare APK
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
 
           mkdir -p release
 
           APK_SOURCE="app/build/outputs/apk/debug/app-debug.apk"
 
           if [ ! -f "$APK_SOURCE" ]; then
-            echo "ERROR: APK was not found:"
-            echo "$APK_SOURCE"
-            echo ""
-            echo "Available APK files:"
+            echo "ERROR: APK not found: $APK_SOURCE"
             find app/build/outputs -type f -name "*.apk" -print || true
             exit 1
           fi
 
           cp "$APK_SOURCE" "release/MyLauncher.apk"
 
-          echo "APK prepared:"
+          echo "Prepared APK:"
           ls -lh release/MyLauncher.apk
 
       # ---------------------------------------------------------
@@ -168,9 +157,10 @@ jobs:
           name: MyLauncher-debug-apk
           path: release/MyLauncher.apk
           if-no-files-found: error
+          retention-days: 30
 
       # ---------------------------------------------------------
-      # Upload Reports
+      # Upload Test and Lint Reports
       # ---------------------------------------------------------
       - name: Upload test and lint reports
         if: always()
@@ -181,32 +171,80 @@ jobs:
             app/build/reports/
             app/build/test-results/
           if-no-files-found: ignore
+          retention-days: 14
 
       # ---------------------------------------------------------
-      # Automatic GitHub Release
-      # Only for push / manual workflow.
-      # Pull requests do not create releases.
+      # Publish Latest Release
+      # Only on the default branch or manual dispatch
       # ---------------------------------------------------------
-      - name: Create Latest GitHub Release
-        if: github.event_name != 'pull_request'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest
-          name: MyLauncher Latest
-          body: |
-            # MyLauncher Latest APK
+      - name: Publish Latest GitHub Release
+        if: >-
+          github.event_name != 'pull_request' &&
+          (
+            github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
+            github.event_name == 'workflow_dispatch'
+          )
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
 
-            This release is automatically generated from the latest successful GitHub Actions build.
+          APK="release/MyLauncher.apk"
 
-            **Commit:** ${{ github.sha }}
-            **Branch:** ${{ github.ref_name }}
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK file missing."
+            exit 1
+          fi
 
-            ## Download
+          echo "Preparing latest release..."
 
-            Download `MyLauncher.apk` below and install it on your Android device.
+          # Find the current latest release, if it exists.
+          if gh release view latest --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Updating existing latest release."
 
-            This `latest` release is automatically replaced by the newest successful build.
-          files: |
-            release/MyLauncher.apk
-          prerelease: false
-          make_latest: true
+            # Replace the existing APK asset.
+            gh release upload latest "$APK" \
+              --repo "$REPOSITORY" \
+              --clobber
+
+            # Update release notes.
+            gh release edit latest \
+              --repo "$REPOSITORY" \
+              --title "MyLauncher Latest" \
+              --notes "Automatically built from commit ${COMMIT_SHA}.
+
+          Download MyLauncher.apk below.
+
+          Minimum Android: 8.0 (API 26)
+          Package: com.mylauncher.app"
+
+            # Move the stable tag to this successful build.
+            git tag -f latest "$COMMIT_SHA"
+            git push origin refs/tags/latest --force
+
+          else
+            echo "Creating the first latest release."
+
+            # Create the tag and release on the current commit.
+            gh release create latest "$APK" \
+              --repo "$REPOSITORY" \
+              --target "$COMMIT_SHA" \
+              --title "MyLauncher Latest" \
+              --notes "Automatically built from commit ${COMMIT_SHA}.
+
+          Download MyLauncher.apk below.
+
+          Minimum Android: 8.0 (API 26)
+          Package: com.mylauncher.app" \
+              --latest
+          fi
+
+          echo "----------------------------------------"
+          echo "Latest APK release step completed."
+          echo "Repository: $REPOSITORY"
+          echo "APK: https://github.com/${REPOSITORY}/releases/download/latest/MyLauncher.apk"
+          echo "Release: https://github.com/${REPOSITORY}/releases/latest"
+          echo "----------------------------------------"
