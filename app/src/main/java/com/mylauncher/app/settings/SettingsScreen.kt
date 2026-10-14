@@ -1,5 +1,6 @@
 package com.mylauncher.app.settings
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -77,6 +78,8 @@ fun SettingsScreen(
     onOpenDashboard: () -> Unit,
     timerSummary: String,
     onOpenTimer: () -> Unit,
+    /** Owned by the launcher so the scroll position survives opening a section and coming back. */
+    scrollState: ScrollState,
 ) {
     val context = LocalContext.current
     val version = remember {
@@ -95,13 +98,29 @@ fun SettingsScreen(
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             ScreenHeader("Settings", onBack)
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(scrollState).padding(bottom = 24.dp)) {
                 Text(
                     "Change how My Launcher looks and works. Changes apply straight away.",
                     Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                SettingsGroup("Personalization and themes", "🎨") {
+                    SettingRow(
+                        "Themes",
+                        onClick = onOpenThemes,
+                        subtitle = "Ready-made themes, your own colors, text size and corners",
+                        value = themeName,
+                    )
+                    SettingDivider()
+                    SettingRow("Wallpaper", onClick = onOpenWallpaper, subtitle = "Choose a wallpaper, dim it or add a blur")
+                    SettingDivider()
+                    SettingSwitch(
+                        "Animations", settings.animations, { onChange(settings.copy(animations = it)) },
+                        subtitle = "Smooth fades between screens",
+                    )
+                }
 
                 SettingsGroup("Home screen", "🏠") {
                     SettingChoice(
@@ -141,13 +160,13 @@ fun SettingsScreen(
                     )
                 }
 
-                SettingsGroup("App drawer", "📱") {
+                SettingsGroup("App drawer and categories", "📱") {
                     SettingChoice(
                         "Open the drawer in",
                         listOf(true to "Categories", false to "All Apps"),
                         smart.groupDrawerByCategory,
                         { onSmartChange(smart.copy(groupDrawerByCategory = it)) },
-                        subtitle = "You can also switch at the top of the drawer",
+                        subtitle = "You can also switch at the top of the drawer. Categories shows one category at a time: swipe sideways to change.",
                     )
                     SettingDivider()
                     SettingChoice(
@@ -158,58 +177,87 @@ fun SettingsScreen(
                         subtitle = "For All Apps and inside a category",
                     )
                     SettingDivider()
-                    SettingSwitch(
-                        "Show suggested apps", smart.smartSuggestions, { onSmartChange(smart.copy(smartSuggestions = it)) },
-                        subtitle = if (settings.trackLaunches) {
-                            "A row of apps you often open at this time of day. Uses only data on this device."
-                        } else {
-                            "Needs \"Remember recently used apps\" (Privacy) to have anything to suggest."
-                        },
-                    )
-                    SettingDivider()
-                    SettingSwitch(
-                        "Show recently used apps", smart.showRecentApps, { onSmartChange(smart.copy(showRecentApps = it)) },
-                        subtitle = if (settings.trackLaunches) {
-                            "A row of apps you opened lately, from this launcher only. No special permission needed."
-                        } else {
-                            "Needs \"Remember recently used apps\" (Privacy). Only apps opened from this launcher are counted."
-                        },
-                    )
-                    SettingDivider()
                     SettingRow(
                         "Manage categories",
                         onClick = onOpenCategories,
-                        subtitle = "Rename, hide and reorder categories, or move apps between them",
+                        subtitle = "Rename, hide, reorder or delete categories, or move apps between them",
                     )
                 }
 
                 SearchSettingsGroup(smart = smart, onChange = onSmartChange)
 
-                SettingsGroup("Gestures", "👆") {
+                SettingsGroup("Gestures and navigation", "👆") {
                     SettingChoice("Swipe up", gestureOptions, settings.swipeUp, { onChange(settings.copy(swipeUp = it)) })
                     SettingDivider()
                     SettingChoice("Swipe down", gestureOptions, settings.swipeDown, { onChange(settings.copy(swipeDown = it)) })
                     SettingDivider()
                     SettingChoice("Double tap", gestureOptions, settings.doubleTap, { onChange(settings.copy(doubleTap = it)) })
+                    SettingDivider()
+                    SettingRow(
+                        "Default launcher",
+                        onClick = onOpenSetup,
+                        subtitle = when {
+                            status.isDefault -> "My Launcher is your home app"
+                            status.currentLabel != null -> "Your home app is ${status.currentLabel}"
+                            else -> "No home app chosen yet"
+                        },
+                    )
                 }
                 SettingNote(
                     "Long press on the home screen always opens the edit menu. Locking the screen is not " +
                         "offered because Android only allows it with an Accessibility Service.",
                 )
 
-                SettingsGroup("Appearance", "🎨") {
-                    SettingRow(
-                        "Themes",
-                        onClick = onOpenThemes,
-                        subtitle = "Ready-made themes, your own colors, text size and corners",
-                        value = themeName,
+                SettingsGroup("App management", "🧰") {
+                    SettingInfo(
+                        "Select several apps",
+                        "Tap the check mark at the top of the app drawer, or long-press an app and choose \"Select several apps\". " +
+                            "Then change category, add to favorites, hide, lock, move to a folder or uninstall them together.",
                     )
                     SettingDivider()
-                    SettingRow("Wallpaper", onClick = onOpenWallpaper, subtitle = "Choose a wallpaper, dim it or add a blur")
+                    SettingRow(
+                        "App usage timer",
+                        onClick = onOpenTimer,
+                        subtitle = "Daily time limits for chosen apps, unlocked with a separate parent PIN",
+                        value = timerSummary,
+                    )
+                }
+
+                SettingsGroup("Recently used apps and suggestions", "🕘") {
+                    SettingSwitch(
+                        "Remember recently used apps", settings.trackLaunches,
+                        { onChange(settings.copy(trackLaunches = it)) },
+                        subtitle = "Only apps opened from this launcher, stored on this device. No special permission needed.",
+                    )
                     SettingDivider()
                     SettingSwitch(
-                        "Animations", settings.animations, { onChange(settings.copy(animations = it)) },
-                        subtitle = "Smooth fades between screens",
+                        "Show recently used apps", smart.showRecentApps, { onSmartChange(smart.copy(showRecentApps = it)) },
+                        subtitle = if (settings.trackLaunches) {
+                            "A row of apps you opened lately, at the top of the drawer"
+                        } else {
+                            "Needs \"Remember recently used apps\" above, otherwise there is nothing to show"
+                        },
+                    )
+                    SettingDivider()
+                    SettingSwitch(
+                        "Show suggested apps", smart.smartSuggestions, { onSmartChange(smart.copy(smartSuggestions = it)) },
+                        subtitle = if (settings.trackLaunches) {
+                            "A row of apps you often open at this time of day. Uses only data on this device."
+                        } else {
+                            "Needs \"Remember recently used apps\" above to have anything to suggest"
+                        },
+                    )
+                    SettingDivider()
+                    SettingRow(
+                        "Usage insights",
+                        onClick = onOpenInsights,
+                        subtitle = "Most used and recently opened apps",
+                    )
+                    SettingDivider()
+                    SettingRow(
+                        "Clear usage history",
+                        onClick = { confirmClearHistory = true },
+                        subtitle = "Removes recent apps, most used apps and insights",
                     )
                 }
 
@@ -217,7 +265,7 @@ fun SettingsScreen(
                     SettingRow(
                         "Private apps",
                         onClick = onOpenHidden,
-                        subtitle = "Hidden inside this launcher only",
+                        subtitle = "Hidden inside this launcher only. They stay installed and visible to Android and other launchers.",
                         value = if (hiddenCount == 0) "None" else "$hiddenCount",
                     )
                     SettingDivider()
@@ -237,52 +285,19 @@ fun SettingsScreen(
                         },
                         value = if (lockedCount == 0) null else "$lockedCount",
                     )
-                    SettingDivider()
-                    SettingRow(
-                        "App usage timer",
-                        onClick = onOpenTimer,
-                        subtitle = "Daily time limits for chosen apps, unlocked with a separate parent PIN",
-                        value = timerSummary,
-                    )
-                    SettingDivider()
-                    SettingSwitch(
-                        "Remember recently used apps", settings.trackLaunches,
-                        { onChange(settings.copy(trackLaunches = it)) },
-                        subtitle = "Only apps opened from this launcher, stored on this device",
-                    )
-                    SettingDivider()
-                    SettingRow(
-                        "Usage insights",
-                        onClick = onOpenInsights,
-                        subtitle = "Most used and recently opened apps",
-                    )
-                    SettingDivider()
-                    SettingRow(
-                        "Clear usage history",
-                        onClick = { confirmClearHistory = true },
-                        subtitle = "Removes recent apps, most used apps and insights",
-                    )
                 }
 
-                SettingsGroup("General", "⚙️") {
-                    SettingRow(
-                        "Default launcher",
-                        onClick = onOpenSetup,
-                        subtitle = when {
-                            status.isDefault -> "My Launcher is your home app"
-                            status.currentLabel != null -> "Your home app is ${status.currentLabel}"
-                            else -> "No home app chosen yet"
-                        },
-                    )
-                    SettingDivider()
+                SettingsGroup("Performance", "⚡") {
                     SettingChoice(
-                        "Performance",
+                        "Performance mode",
                         PerformanceMode.entries.map { it to it.label },
                         settings.performance,
                         { onChange(settings.copy(performance = it)) },
                         subtitle = settings.performance.description,
                     )
-                    SettingDivider()
+                }
+
+                SettingsGroup("Backup and device", "💾") {
                     SettingRow(
                         "Backup and restore",
                         onClick = onOpenBackup,
@@ -296,7 +311,7 @@ fun SettingsScreen(
                     )
                 }
 
-                SettingsGroup("About", "ℹ️") {
+                SettingsGroup("About and developer", "ℹ️") {
                     SettingInfo("App", "My Launcher")
                     SettingDivider()
                     SettingInfo("Developer", "Azi Creation")
