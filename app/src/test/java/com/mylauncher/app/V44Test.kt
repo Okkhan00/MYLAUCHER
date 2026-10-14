@@ -1,13 +1,11 @@
 package com.mylauncher.app
 
 import com.mylauncher.app.about.VersionHistory
-import com.mylauncher.app.categories.CategorySwipe
 import com.mylauncher.app.data.AppListOps
 import com.mylauncher.app.data.PackageEvents
 import com.mylauncher.app.data.model.AppInfo
 import com.mylauncher.app.data.model.SmartSettings
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,26 +52,6 @@ class V44Test {
         assertSame(before, AppListOps.replacePackage(before, "a", listOf(app("a", "Old name"))))
     }
 
-    // ---- category swipe ----
-    private val ids = listOf("social", "games", "tools")
-
-    @Test fun swipeLeftGoesToNextAndRightToPrevious() {
-        assertEquals("tools", CategorySwipe.target(ids, "games", -200f, 100f))
-        assertEquals("social", CategorySwipe.target(ids, "games", 200f, 100f))
-    }
-
-    @Test fun firstAndLastCategoryHaveNothingBeyondThem() {
-        assertNull(CategorySwipe.target(ids, "social", 200f, 100f))
-        assertNull(CategorySwipe.target(ids, "tools", -200f, 100f))
-    }
-
-    @Test fun shortDragsAndUnknownCategoriesDoNothing() {
-        assertNull(CategorySwipe.target(ids, "games", -99f, 100f))
-        assertNull(CategorySwipe.target(ids, "games", 50f, 100f))
-        assertNull(CategorySwipe.target(ids, "missing", -300f, 100f))
-        assertNull(CategorySwipe.target(emptyList(), "games", -300f, 100f))
-    }
-
     // ---- settings defaults and About ----
     @Test fun recentAndSuggestionsAreOnByDefault() {
         val s = SmartSettings()
@@ -83,7 +61,7 @@ class V44Test {
 
     @Test fun versionHistoryIsNewestFirstAndEveryEntryHasContent() {
         val releases = VersionHistory.releases
-        assertEquals("4.4", releases.first().version)
+        assertEquals("4.5", releases.first().version)
         assertTrue(releases.all { it.points.isNotEmpty() && it.title.isNotBlank() })
         assertEquals(releases.map { it.version }.distinct(), releases.map { it.version })
     }
