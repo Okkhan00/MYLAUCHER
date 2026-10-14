@@ -13,6 +13,7 @@ import com.mylauncher.app.backup.BackupStatus
 import com.mylauncher.app.backup.BackupZip
 import com.mylauncher.app.categories.AppCategory
 import com.mylauncher.app.categories.CategoryConfig
+import com.mylauncher.app.categories.CategoryRules
 import com.mylauncher.app.data.model.AppInfo
 import com.mylauncher.app.data.model.Folder
 import com.mylauncher.app.data.model.LaunchEvent
@@ -537,6 +538,63 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     suspend fun timerStatuses(): Map<String, TimerEngine.Evaluation> = timerEngine.evaluateAll()
 
     fun usageAccessGranted(): Boolean = com.mylauncher.app.timer.UsageAccess.isGranted(getApplication<Application>())
+
+
+    // ---- V4.5: bulk operations on several apps at once -----------------------------------------
+
+    fun assignCategory(pkgs: List<String>, category: AppCategory?) {
+        if (pkgs.isEmpty()) return
+        viewModelScope.launch { prefs.setCategoryOverrides(pkgs, category) }
+    }
+
+    /**
+     * Creates a category and puts [pkgs] in it in one saved step. [onResult] gets null on success or a short
+     * message to show the user (blank or duplicate name, no free slot). Nothing changes when it fails.
+     */
+    fun createCategoryForApps(name: String, emoji: String?, pkgs: List<String>, onResult: (String?) -> Unit) {
+        when (val result = CategoryRules.create(categoryConfig.value, name, emoji)) {
+            is CategoryRules.CreateResult.Rejected -> onResult(result.message)
+            is CategoryRules.CreateResult.Ok -> viewModelScope.launch {
+                prefs.saveCategoryWithApps(result.config, pkgs, result.category)
+                onResult(null)
+            }
+        }
+    }
+
+    fun deleteCustomCategory(category: AppCategory) {
+        viewModelScope.launch { prefs.deleteCustomCategory(category) }
+    }
+
+    fun addFavorites(pkgs: List<String>) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.addFavorites(pkgs) }
+    }
+
+    fun removeFavorites(pkgs: List<String>) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.removeFavorites(pkgs) }
+    }
+
+    fun hideApps(pkgs: List<String>) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.hideAll(pkgs) }
+    }
+
+    fun unhideApps(pkgs: List<String>) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.unhideAll(pkgs) }
+    }
+
+    fun setAppsLocked(pkgs: List<String>, locked: Boolean) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.setAppsLocked(pkgs, locked) }
+    }
+
+    fun addAppsToFolder(id: String, pkgs: List<String>) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.addAppsToFolder(id, pkgs) }
+    }
+
+    fun removeAppsFromFolders(pkgs: List<String>) {
+        if (pkgs.isNotEmpty()) viewModelScope.launch { prefs.removeAppsFromFolders(pkgs) }
+    }
+
+    /** Re-checks one package right away (after an uninstall dialog closed). */
+    fun recheckPackage(packageName: String) = repository.packageMayHaveChanged(packageName, immediate = true)
 
     private fun secondsCeil(ms: Long): Int = ceil(ms / 1000.0).toInt()
 }
