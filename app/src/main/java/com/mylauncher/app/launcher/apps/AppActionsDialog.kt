@@ -49,7 +49,14 @@ class AppMenuActions(
 
 /** Long-press menu. Uses only official system screens and intents; nothing is silent or privileged. */
 @Composable
-fun AppActionsDialog(app: AppInfo, actions: AppMenuActions, showMove: Boolean, onDismiss: () -> Unit) {
+fun AppActionsDialog(
+    app: AppInfo,
+    actions: AppMenuActions,
+    showMove: Boolean,
+    onDismiss: () -> Unit,
+    /** When given, a "Select several apps" entry starts selection mode with this app selected. */
+    onSelect: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val isFavorite = app.packageName in actions.favoriteIds
     val folder = actions.folders.firstOrNull { app.packageName in it.appIds }
@@ -65,6 +72,7 @@ fun AppActionsDialog(app: AppInfo, actions: AppMenuActions, showMove: Boolean, o
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 MenuItem("Open") { actions.open(app); onDismiss() }
+                if (onSelect != null) MenuItem("Select several apps") { onSelect(); onDismiss() }
                 MenuItem("App info") { AppActions.openAppInfo(context, app.packageName); onDismiss() }
                 MenuItem(if (isFavorite) "Remove from home screen" else "Add to home screen") {
                     actions.toggleFavorite(app); onDismiss()
