@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -24,6 +26,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,12 +42,13 @@ private fun Modifier.tileClickable(
     label: String,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    selecting: Boolean = false,
 ): Modifier {
     if (!interactive) return this
     val haptic = LocalHapticFeedback.current
     return this.combinedClickable(
-        onClickLabel = "Open $label",
-        onLongClickLabel = "More actions for $label",
+        onClickLabel = if (selecting) "Select or deselect $label" else "Open $label",
+        onLongClickLabel = if (selecting) "Select or deselect $label" else "More actions for $label",
         onLongClick = {
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             onLongClick()
@@ -70,7 +74,31 @@ private fun TileLabel(text: String, onWallpaper: Boolean) {
     )
 }
 
-/** Grid cell: icon with optional label. Tap launches, long press opens the menu. */
+/**
+ * Round check mark shown on apps while several are being selected. Drawn with plain shapes and a text tick,
+ * so it needs no extra icon library and follows the theme colors.
+ */
+@Composable
+fun SelectionMark(selected: Boolean, modifier: Modifier = Modifier, size: Dp = 22.dp) {
+    val primary = MaterialTheme.colorScheme.primary
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(if (selected) primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+            .border(2.dp, if (selected) primary else MaterialTheme.colorScheme.outline, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) {
+            Text("\u2713", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/**
+ * Grid cell: icon with optional label. Tap launches, long press opens the menu. While apps are being
+ * selected, [selected] is non-null: the cell shows a selection mark and the caller turns taps into toggles.
+ */
 @Composable
 fun AppTile(
     app: AppInfo,
@@ -81,16 +109,25 @@ fun AppTile(
     modifier: Modifier = Modifier,
     onWallpaper: Boolean = false,
     interactive: Boolean = true,
+    selected: Boolean? = null,
 ) {
+    val highlight = if (selected == true) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else Color.Transparent
     Column(
         modifier = modifier
             .clip(MaterialTheme.shapes.large)
-            .tileClickable(interactive, app.label, onClick, onLongClick)
+            .background(highlight)
+            .tileClickable(interactive, app.label, onClick, onLongClick, selecting = selected != null)
             .padding(horizontal = 4.dp, vertical = 8.dp)
-            .semantics(mergeDescendants = true) { contentDescription = app.label },
+            .semantics(mergeDescendants = true) {
+                contentDescription = app.label
+                if (selected != null) this.selected = selected
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        AppIcon(app, iconSize)
+        Box {
+            AppIcon(app, iconSize)
+            if (selected != null) SelectionMark(selected, Modifier.align(Alignment.TopEnd))
+        }
         if (showLabel) TileLabel(app.label, onWallpaper)
     }
 }
@@ -149,15 +186,21 @@ fun AppRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
+    selected: Boolean? = null,
 ) {
+    val highlight = if (selected == true) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f) else Color.Transparent
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 56.dp)
             .clip(MaterialTheme.shapes.medium)
-            .tileClickable(true, app.label, onClick, onLongClick)
+            .background(highlight)
+            .tileClickable(true, app.label, onClick, onLongClick, selecting = selected != null)
             .padding(horizontal = 16.dp, vertical = 6.dp)
-            .semantics(mergeDescendants = true) { contentDescription = app.label },
+            .semantics(mergeDescendants = true) {
+                contentDescription = app.label
+                if (selected != null) this.selected = selected
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -168,7 +211,11 @@ fun AppRow(
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+        } else {
+            Box(Modifier.weight(1f))
         }
+        if (selected != null) SelectionMark(selected)
     }
 }
