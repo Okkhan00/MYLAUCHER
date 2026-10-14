@@ -32,6 +32,31 @@ object AppActions {
         start(context, intent, "Can't uninstall this app")
     }
 
+    /**
+     * Uninstall request that asks Android to report back (RESULT_OK / RESULT_CANCELED / RESULT_FIRST_USER).
+     * It still opens Android's own confirmation screen; nothing is ever uninstalled silently.
+     */
+    fun uninstallIntent(packageName: String): Intent =
+        Intent(Intent.ACTION_DELETE, Uri.fromParts("package", packageName, null))
+            .putExtra(Intent.EXTRA_RETURN_RESULT, true)
+
+    /** Apps that came with the phone: Android does not let a launcher uninstall them. */
+    fun isSystemApp(context: Context, packageName: String): Boolean = try {
+        @Suppress("DEPRECATION")
+        (context.packageManager.getApplicationInfo(packageName, 0).flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0
+    } catch (e: Exception) {
+        false
+    }
+
+    /** What Android says right now, used after an uninstall screen closed (the result code alone is not trusted). */
+    fun isInstalled(context: Context, packageName: String): Boolean = try {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageInfo(packageName, 0)
+        true
+    } catch (e: Exception) {
+        false
+    }
+
     /** Shares a link to the app through the standard Android share sheet (no APK is shared). */
     fun share(context: Context, app: AppInfo) {
         val text = "${app.label}: https://play.google.com/store/apps/details?id=${app.packageName}"
