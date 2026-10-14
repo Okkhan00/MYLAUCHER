@@ -6,6 +6,15 @@ data class ReleaseNote(val version: String, val title: String, val points: List<
 object VersionHistory {
     val releases: List<ReleaseNote> = listOf(
         ReleaseNote(
+            "4.5", "Select several apps",
+            listOf(
+                "Select several apps and change their category, add to favorites, hide, lock, move to a folder or uninstall them together",
+                "Create your own categories from a selection",
+                "Categories now show one at a time, with a position indicator",
+                "Settings keeps its scroll position and is grouped into clearer sections",
+            ),
+        ),
+        ReleaseNote(
             "4.4", "Reliability and polish",
             listOf(
                 "More reliable app list: new, updated and removed apps are picked up, also when you return to the launcher",
