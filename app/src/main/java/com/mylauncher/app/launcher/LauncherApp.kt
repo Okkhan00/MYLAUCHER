@@ -1,6 +1,8 @@
 package com.mylauncher.app.launcher
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -23,6 +26,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.mylauncher.app.backup.BackupScreen
+import com.mylauncher.app.bulk.BulkActions
+import com.mylauncher.app.bulk.BulkText
+import com.mylauncher.app.bulk.BulkUninstallDialog
+import com.mylauncher.app.bulk.UninstallItem
+import com.mylauncher.app.bulk.UninstallRules
+import com.mylauncher.app.bulk.UninstallSession
 import com.mylauncher.app.categories.CategoryOrganizer
 import com.mylauncher.app.device.DeviceDashboardScreen
 import com.mylauncher.app.performance.PerformanceProfile
@@ -123,6 +132,8 @@ fun LauncherApp(vm: LauncherViewModel) {
     val timerUnlocked by vm.timerUnlocked.collectAsStateWithLifecycle()
     val timerPrompt by vm.timerPrompt.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    // Settings keeps its scroll position while a section is open and when a switch changes how screens are shown.
+    val settingsScroll = rememberScrollState()
     val widgetController = vm.widgetController
     var showWidgetPicker by remember { mutableStateOf(false) }
 
@@ -130,6 +141,22 @@ fun LauncherApp(vm: LauncherViewModel) {
     var pendingLaunch by remember { mutableStateOf<AppInfo?>(null) }
     // App whose allowed time has ended. Never saved with instance state, so verification never outlives the screen.
     var timerGate by remember { mutableStateOf<AppInfo?>(null) }
+
+    // Packages waiting for the launcher PIN before app lock is turned off for all of them (bulk unlock).
+    var pendingBulkUnlock by remember { mutableStateOf<List<String>?>(null) }
+
+    // Bulk uninstall: one app at a time, each through Android's own confirmation screen.
+    var uninstallSession by remember { mutableStateOf<UninstallSession?>(null) }
+    var uninstallStarted by remember { mutableStateOf(false) }
+    val uninstallLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val session = uninstallSession
+        val item = session?.next
+        if (session != null && item != null) {
+            val stillInstalled = AppActions.isInstalled(context, item.packageName)
+            uninstallSession = session.record(UninstallRules.classify(result.resultCode, stillInstalled))
+            vm.recheckPackage(item.packageName)
+        }
+    }
     var screen by rememberSaveable { mutableStateOf(Screen.HOME) }
     var focusSearch by rememberSaveable { mutableStateOf(false) }
     var handledSignal by rememberSaveable { mutableIntStateOf(homeSignal) }
@@ -149,7 +176,7 @@ fun LauncherApp(vm: LauncherViewModel) {
         if (screen == Screen.HOME || screen == Screen.DRAWER) vm.relock()
         if (screen != Screen.TIMER) vm.relockTimer()
     }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.relock(); vm.relockTimer(); pendingLaunch = null; timerGate = null }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.relock(); vm.relockTimer(); pendingLaunch = null; timerGate = null; pendingBulkUnlock = null }
 
     // Tapping the "time is up" notification: show the notice only if the time really is up.
     LaunchedEffect(timerPrompt, allApps) {
@@ -255,9 +282,62 @@ fun LauncherApp(vm: LauncherViewModel) {
                     appLockAvailable = sec.lockEnabled,
                     lockedApps = lockedApps,
                     setLocked = vm::setAppLocked,
-                    categories = categoryConfig.normalized().entries,
+                    categories = categoryConfig.activeEntries,
                     categoryOf = { app -> CategoryOrganizer.categoryOf(app, categoryOverrides) },
                     setCategory = vm::setCategory,
+                )
+            }
+
+
+            // Bulk actions for the drawer's selection mode. Rebuilt only when the data it reports changes.
+            val bulkActions = remember(
+                categoryConfig, categoryOverrides, favoriteIds, hiddenIds, lockedApps, folders, sec.lockEnabled, vm, context,
+            ) {
+                BulkActions(
+                    categories = categoryConfig.activeEntries.filter { !it.hidden },
+                    manualCategoryApps = categoryOverrides.keys,
+                    homeTokens = favoriteIds,
+                    hidden = hiddenIds,
+                    locked = lockedApps,
+                    folderApps = folders.flatMapTo(HashSet()) { it.appIds },
+                    folders = folders,
+                    lockAvailable = sec.lockEnabled,
+                    assignCategory = vm::assignCategory,
+                    createCategory = vm::createCategoryForApps,
+                    addFavorites = vm::addFavorites,
+                    removeFavorites = vm::removeFavorites,
+                    hide = vm::hideApps,
+                    unhide = vm::unhideApps,
+                    lock = { vm.setAppsLocked(it, true) },
+                    requestUnlock = { pendingBulkUnlock = it },
+                    addToFolder = vm::addAppsToFolder,
+                    removeFromFolders = vm::removeAppsFromFolders,
+                    uninstall = { apps ->
+                        val items = apps.map { UninstallItem(it.packageName, it.label) }
+                        uninstallSession = UninstallSession.plan(items) { item ->
+                            UninstallRules.ineligibleReason(
+                                item.packageName, context.packageName, AppActions.isSystemApp(context, item.packageName),
+                            )
+                        }
+                        uninstallStarted = false
+                    },
+                    notify = { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() },
+                )
+            }
+
+            uninstallSession?.let { session ->
+                BulkUninstallDialog(
+                    session = session,
+                    started = uninstallStarted,
+                    onUninstallNext = {
+                        val next = session.next
+                        if (next != null) {
+                            uninstallStarted = true
+                            uninstallLauncher.launch(AppActions.uninstallIntent(next.packageName))
+                        }
+                    },
+                    onStop = { uninstallSession = session.stop() },
+                    onClose = { uninstallSession = null; uninstallStarted = false },
                 )
             }
 
@@ -291,6 +371,28 @@ fun LauncherApp(vm: LauncherViewModel) {
                             }
                         },
                         onClose = { timerGate = null; screen = Screen.HOME },
+                    )
+                } else if (pendingBulkUnlock != null) {
+                    val packages = pendingBulkUnlock.orEmpty()
+                    val finishUnlock = {
+                        vm.relock() // confirming here must not unlock settings
+                        vm.setAppsLocked(packages, false)
+                        Toast.makeText(context, "App lock turned off for ${BulkText.apps(packages.size)}", Toast.LENGTH_SHORT).show()
+                        pendingBulkUnlock = null
+                    }
+                    LockScreen(
+                        biometricEnabled = sec.biometricEnabled,
+                        biometricAvailable = biometricAvailable,
+                        submitPin = { pin ->
+                            val attempt = vm.submitPin(pin)
+                            if (attempt.success) finishUnlock()
+                            attempt
+                        },
+                        onBiometricSuccess = { finishUnlock() },
+                        onCancel = { pendingBulkUnlock = null },
+                        title = "Turn off app lock",
+                        message = "Enter your launcher PIN to turn off app lock for ${BulkText.apps(packages.size)}.",
+                        cancelLabel = "Cancel",
                     )
                 } else if (waiting != null) {
                     LockScreen(
@@ -375,6 +477,7 @@ fun LauncherApp(vm: LauncherViewModel) {
                             drawerOpacity = drawerOpacity,
                             wallpaperScrim = if (wallpaper.drawerOverlay && drawerOpacity < 1f) wallpaperScrim else Color.Transparent,
                             menu = menu,
+                            bulk = bulkActions,
                             onLaunch = launchApp,
                             onOpenSettings = { screen = Screen.SETTINGS },
                             onGroupByCategoryChange = { vm.saveSmartSettings(smart.copy(groupDrawerByCategory = it)) },
@@ -427,6 +530,7 @@ fun LauncherApp(vm: LauncherViewModel) {
                                 else -> "${timerState.timers.size} app" + if (timerState.timers.size == 1) "" else "s"
                             },
                             onOpenTimer = { screen = Screen.TIMER },
+                            scrollState = settingsScroll,
                         )
                         Screen.TIMER -> TimerScreen(
                             state = timerState,
@@ -486,6 +590,7 @@ fun LauncherApp(vm: LauncherViewModel) {
                             onConfigChange = vm::updateCategoryConfig,
                             onSetCategory = vm::setCategory,
                             onReset = vm::resetCategories,
+                            onDeleteCustom = vm::deleteCustomCategory,
                             onBack = { screen = Screen.SETTINGS },
                         )
                         Screen.INSIGHTS -> UsageInsightsScreen(
@@ -500,6 +605,7 @@ fun LauncherApp(vm: LauncherViewModel) {
                             apps = allApps,
                             hiddenIds = hiddenIds,
                             onSetHidden = vm::setHidden,
+                            onUnhideAll = vm::unhideApps,
                             onBack = { screen = Screen.SETTINGS },
                         )
                         Screen.SETUP -> SetupScreen(controller = controller, onBack = { screen = Screen.SETTINGS })
