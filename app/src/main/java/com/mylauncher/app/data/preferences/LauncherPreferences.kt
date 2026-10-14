@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.mylauncher.app.categories.AppCategory
 import com.mylauncher.app.categories.CategoryCodec
+import com.mylauncher.app.categories.CategoryRules
 import com.mylauncher.app.categories.CategoryConfig
 import com.mylauncher.app.data.model.Folder
 import com.mylauncher.app.data.model.LaunchEvent
@@ -451,6 +452,91 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
             if (category == null) map.remove(pkg) else map[pkg] = category
             p[PrefKeys.CATEGORY_OVERRIDES] = CategoryCodec.encodeOverrides(map)
         }
+    }
+
+    // ---- Bulk operations (V4.5): each is one DataStore edit, so a batch never leaves half-applied changes ----
+
+    /** Gives every app in [pkgs] the manual category [category]; null returns them to the automatic category. */
+    suspend fun setCategoryOverrides(pkgs: List<String>, category: AppCategory?) {
+        store.edit { p ->
+            val map = LinkedHashMap(CategoryCodec.decodeOverrides(p[PrefKeys.CATEGORY_OVERRIDES]))
+            for (pkg in pkgs) if (category == null) map.remove(pkg) else map[pkg] = category
+            p[PrefKeys.CATEGORY_OVERRIDES] = CategoryCodec.encodeOverrides(map)
+        }
+    }
+
+    /** Saves a newly created category and assigns [pkgs] to it in the same edit. */
+    suspend fun saveCategoryWithApps(config: CategoryConfig, pkgs: List<String>, category: AppCategory) {
+        store.edit { p ->
+            p[PrefKeys.CATEGORY_CONFIG] = CategoryCodec.encodeConfig(config)
+            val map = LinkedHashMap(CategoryCodec.decodeOverrides(p[PrefKeys.CATEGORY_OVERRIDES]))
+            for (pkg in pkgs) map[pkg] = category
+            p[PrefKeys.CATEGORY_OVERRIDES] = CategoryCodec.encodeOverrides(map)
+        }
+    }
+
+    /** Deletes a user-created category; its apps go back to their automatic categories. */
+    suspend fun deleteCustomCategory(category: AppCategory) {
+        if (!category.isCustom) return
+        store.edit { p ->
+            val config = CategoryCodec.decodeConfig(p[PrefKeys.CATEGORY_CONFIG])
+            p[PrefKeys.CATEGORY_CONFIG] = CategoryCodec.encodeConfig(CategoryRules.delete(config, category))
+            val map = CategoryCodec.decodeOverrides(p[PrefKeys.CATEGORY_OVERRIDES]).filterValues { it != category }
+            p[PrefKeys.CATEGORY_OVERRIDES] = CategoryCodec.encodeOverrides(map)
+        }
+    }
+
+    /** Puts apps on the home screen (never twice); they leave any folder, like a single add does. */
+    suspend fun addFavorites(pkgs: List<String>) {
+        store.edit { p ->
+            var list = ListCodec.decode(p[PrefKeys.FAVORITES])
+            var folders = FolderCodec.decode(p[PrefKeys.FOLDERS])
+            for (pkg in pkgs) {
+                list = ListOps.add(list, pkg)
+                folders = FolderOps.removeAppEverywhere(folders, pkg)
+            }
+            p[PrefKeys.FAVORITES] = ListCodec.encode(list)
+            p[PrefKeys.FOLDERS] = FolderCodec.encode(folders)
+        }
+    }
+
+    suspend fun removeFavorites(pkgs: List<String>) = editList(PrefKeys.FAVORITES) { list ->
+        pkgs.fold(list) { acc, pkg -> ListOps.remove(acc, pkg) }
+    }
+
+    /** Hides apps from this launcher only (and from the home screen). */
+    suspend fun hideAll(pkgs: List<String>) {
+        store.edit { p ->
+            p[PrefKeys.HIDDEN] = ListCodec.encode(pkgs.fold(ListCodec.decode(p[PrefKeys.HIDDEN])) { acc, pkg -> ListOps.add(acc, pkg) })
+            p[PrefKeys.FAVORITES] = ListCodec.encode(pkgs.fold(ListCodec.decode(p[PrefKeys.FAVORITES])) { acc, pkg -> ListOps.remove(acc, pkg) })
+        }
+    }
+
+    suspend fun unhideAll(pkgs: List<String>) = editList(PrefKeys.HIDDEN) { list ->
+        pkgs.fold(list) { acc, pkg -> ListOps.remove(acc, pkg) }
+    }
+
+    suspend fun setAppsLocked(pkgs: List<String>, locked: Boolean) = editList(PrefKeys.LOCKED_APPS) { list ->
+        pkgs.fold(list) { acc, pkg -> if (locked) ListOps.add(acc, pkg) else ListOps.remove(acc, pkg) }
+    }
+
+    /** Moves apps into folder [id]: they leave the home list and any other folder. Unknown folder: no change. */
+    suspend fun addAppsToFolder(id: String, pkgs: List<String>) {
+        store.edit { p ->
+            var folders = FolderCodec.decode(p[PrefKeys.FOLDERS])
+            if (folders.none { it.id == id }) return@edit
+            var favorites = ListCodec.decode(p[PrefKeys.FAVORITES])
+            for (pkg in pkgs) {
+                folders = FolderOps.addApp(folders, id, pkg)
+                favorites = ListOps.remove(favorites, pkg)
+            }
+            p[PrefKeys.FOLDERS] = FolderCodec.encode(folders)
+            p[PrefKeys.FAVORITES] = ListCodec.encode(favorites)
+        }
+    }
+
+    suspend fun removeAppsFromFolders(pkgs: List<String>) = editFolders { folders ->
+        pkgs.fold(folders) { acc, pkg -> FolderOps.removeAppEverywhere(acc, pkg) }
     }
 
     suspend fun saveCategoryConfig(config: CategoryConfig) {
