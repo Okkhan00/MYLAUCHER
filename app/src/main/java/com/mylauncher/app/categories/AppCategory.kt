@@ -14,7 +14,25 @@ enum class AppCategory(val id: String, val defaultName: String) {
     TOOLS("tools", "Tools"),
     EDUCATION("education", "Education"),
     PHOTOGRAPHY("photography", "Photography"),
-    OTHER("other", "Other Apps");
+    OTHER("other", "Other Apps"),
+
+    // Slots for categories the user creates (V4.5). A slot is unused until it gets a name, so the 12 built-in
+    // categories, their ids and all saved data are untouched. Unused slots never appear anywhere.
+    CUSTOM_1("custom_1", "My category 1"),
+    CUSTOM_2("custom_2", "My category 2"),
+    CUSTOM_3("custom_3", "My category 3"),
+    CUSTOM_4("custom_4", "My category 4"),
+    CUSTOM_5("custom_5", "My category 5"),
+    CUSTOM_6("custom_6", "My category 6"),
+    CUSTOM_7("custom_7", "My category 7"),
+    CUSTOM_8("custom_8", "My category 8"),
+    CUSTOM_9("custom_9", "My category 9"),
+    CUSTOM_10("custom_10", "My category 10"),
+    CUSTOM_11("custom_11", "My category 11"),
+    CUSTOM_12("custom_12", "My category 12");
+
+    /** True for the slots used by user-created categories. */
+    val isCustom: Boolean get() = id.startsWith("custom_")
 
     companion object {
         fun fromId(id: String?): AppCategory? = entries.firstOrNull { it.id == id }
@@ -39,7 +57,28 @@ object CategoryVisuals {
         AppCategory.EDUCATION -> "\uD83C\uDF93"          // graduation cap
         AppCategory.PHOTOGRAPHY -> "\uD83D\uDCF7"        // camera
         AppCategory.OTHER -> "\uD83D\uDCE6"              // package
+        AppCategory.CUSTOM_1 -> "\u2B50"                // star
+        AppCategory.CUSTOM_2 -> "\u2764\uFE0F"        // heart
+        AppCategory.CUSTOM_3 -> "\uD83D\uDD25"         // fire
+        AppCategory.CUSTOM_4 -> "\uD83C\uDF1F"         // glowing star
+        AppCategory.CUSTOM_5 -> "\uD83C\uDFAF"         // bullseye
+        AppCategory.CUSTOM_6 -> "\uD83C\uDF08"         // rainbow
+        AppCategory.CUSTOM_7 -> "\uD83D\uDCA1"         // light bulb
+        AppCategory.CUSTOM_8 -> "\uD83C\uDFB5"         // musical note
+        AppCategory.CUSTOM_9 -> "\uD83D\uDCDA"         // books
+        AppCategory.CUSTOM_10 -> "\uD83C\uDF55"        // pizza
+        AppCategory.CUSTOM_11 -> "\uD83D\uDE80"        // rocket
+        AppCategory.CUSTOM_12 -> "\uD83C\uDF40"        // four-leaf clover
     }
+
+    /** Icons offered when creating a category. */
+    val choices: List<String> = listOf(
+        "\u2B50", "\u2764\uFE0F", "\uD83D\uDD25", "\uD83C\uDF1F", "\uD83C\uDFAF", "\uD83C\uDF08",
+        "\uD83D\uDCA1", "\uD83C\uDFB5", "\uD83D\uDCDA", "\uD83C\uDF55", "\uD83D\uDE80", "\uD83C\uDF40",
+    )
+
+    /** The icon shown for an entry: the one the user picked, otherwise the category's own. */
+    fun emoji(entry: CategoryEntry): String = entry.emoji?.takeIf { it in choices } ?: emoji(entry.category)
 }
 
 /** How many preview icons fit on a category card. Pure math so it is unit tested. */
