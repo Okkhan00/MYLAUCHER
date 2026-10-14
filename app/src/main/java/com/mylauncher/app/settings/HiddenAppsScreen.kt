@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -41,10 +43,12 @@ fun HiddenAppsScreen(
     apps: List<AppInfo>,
     hiddenIds: Set<String>,
     onSetHidden: (AppInfo, Boolean) -> Unit,
+    onUnhideAll: (List<String>) -> Unit,
     onBack: () -> Unit,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var showAll by rememberSaveable { mutableStateOf(false) }
+    var confirmUnhideAll by remember { mutableStateOf(false) }
     val base = remember(apps, hiddenIds, showAll) {
         if (showAll) apps else apps.filter { it.packageName in hiddenIds }
     }
@@ -73,6 +77,11 @@ fun HiddenAppsScreen(
                     label = { Text("Private (${hiddenIds.size})") },
                 )
                 FilterChip(selected = showAll, onClick = { showAll = true }, label = { Text("All apps") })
+            }
+            if (!showAll && hiddenIds.isNotEmpty()) {
+                TextButton(onClick = { confirmUnhideAll = true }, modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text("Unhide all (${hiddenIds.size})")
+                }
             }
 
             when {
@@ -108,5 +117,17 @@ fun HiddenAppsScreen(
                 }
             }
         }
+    }
+
+    if (confirmUnhideAll) {
+        AlertDialog(
+            onDismissRequest = { confirmUnhideAll = false },
+            title = { Text("Unhide all apps?") },
+            text = { Text("All ${hiddenIds.size} private apps will show up again in My Launcher. Nothing is installed or removed.") },
+            confirmButton = {
+                TextButton(onClick = { onUnhideAll(hiddenIds.toList()); confirmUnhideAll = false }) { Text("Unhide all") }
+            },
+            dismissButton = { TextButton(onClick = { confirmUnhideAll = false }) { Text("Cancel") } },
+        )
     }
 }
