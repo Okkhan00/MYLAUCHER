@@ -52,6 +52,7 @@ fun CategoriesScreen(
     onConfigChange: ((CategoryConfig) -> CategoryConfig) -> Unit,
     onSetCategory: (AppInfo, AppCategory?) -> Unit,
     onReset: () -> Unit,
+    onDeleteCustom: (AppCategory) -> Unit,
     onBack: () -> Unit,
 ) {
     val groups = remember(apps, overrides, config) {
@@ -61,6 +62,7 @@ fun CategoriesScreen(
     var renaming by remember { mutableStateOf<CategoryEntry?>(null) }
     var moving by remember { mutableStateOf<AppInfo?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<CategoryEntry?>(null) }
 
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
@@ -73,7 +75,7 @@ fun CategoriesScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LazyColumn(Modifier.weight(1f)) {
-                items(config.normalized().entries, key = { it.category.id }) { entry ->
+                items(config.activeEntries, key = { it.category.id }) { entry ->
                     val categoryApps = groups[entry.category]?.apps.orEmpty()
                     Column(Modifier.fillMaxWidth()) {
                         Row(
@@ -109,6 +111,9 @@ fun CategoriesScreen(
                             TextButton(onClick = { renaming = entry }) { Text("Rename") }
                             TextButton(onClick = { onConfigChange { it.move(entry.category, -1) } }) { Text("Move up") }
                             TextButton(onClick = { onConfigChange { it.move(entry.category, 1) } }) { Text("Move down") }
+                            if (entry.category.isCustom) {
+                                TextButton(onClick = { deleting = entry }) { Text("Delete") }
+                            }
                         }
                         if (expanded == entry.category) {
                             if (categoryApps.isEmpty()) {
@@ -153,14 +158,14 @@ fun CategoriesScreen(
         var text by remember(entry.category) { mutableStateOf(entry.customName.orEmpty()) }
         AlertDialog(
             onDismissRequest = { renaming = null },
-            title = { Text("Rename ${entry.category.defaultName}") },
+            title = { Text("Rename ${if (entry.category.isCustom) entry.displayName else entry.category.defaultName}") },
             text = {
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.take(CategoryCodec.MAX_NAME) },
                     singleLine = true,
                     label = { Text("Name") },
-                    supportingText = { Text("Leave empty to use the original name") },
+                    supportingText = { Text(if (entry.category.isCustom) "A name is required" else "Leave empty to use the original name") },
                 )
             },
             confirmButton = {
@@ -180,7 +185,7 @@ fun CategoriesScreen(
             text = {
                 Column {
                     MenuItem("Automatic (recommended)") { onSetCategory(app, null); moving = null }
-                    config.normalized().entries.forEach { entry ->
+                    config.activeEntries.forEach { entry ->
                         MenuItem(entry.displayName) { onSetCategory(app, entry.category); moving = null }
                     }
                 }
@@ -190,11 +195,21 @@ fun CategoriesScreen(
         )
     }
 
+    deleting?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Delete \"${entry.displayName}\"?") },
+            text = { Text("Its apps are not removed. They go back to their automatic categories.") },
+            confirmButton = { TextButton(onClick = { onDeleteCustom(entry.category); deleting = null }) { Text("Delete") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+        )
+    }
+
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text("Reset categories?") },
-            text = { Text("Names, order, hidden categories and apps you moved go back to automatic.") },
+            text = { Text("Names, order, hidden categories, categories you created and apps you moved go back to automatic.") },
             confirmButton = { TextButton(onClick = { onReset(); confirmReset = false }) { Text("Reset") } },
             dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } },
         )
