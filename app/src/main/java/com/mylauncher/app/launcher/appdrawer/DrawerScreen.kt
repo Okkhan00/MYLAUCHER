@@ -1,17 +1,24 @@
 package com.mylauncher.app.launcher.appdrawer
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.listSaver
+import com.mylauncher.app.bulk.BulkActionBar
+import com.mylauncher.app.bulk.BulkActions
+import com.mylauncher.app.bulk.BulkSelection
+import com.mylauncher.app.bulk.SelectionTopBar
+import com.mylauncher.app.categories.CategoryVisuals
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,7 +57,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -59,14 +65,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.mylauncher.app.categories.CategoryGroup
-import com.mylauncher.app.categories.CategorySwipe
 import com.mylauncher.app.data.model.AppInfo
 import com.mylauncher.app.data.model.DrawerLayout
 import com.mylauncher.app.data.model.Folder
@@ -100,6 +103,7 @@ fun DrawerScreen(
     smart: SmartSettings,
     categoryGroups: List<CategoryGroup>,
     menu: AppMenuActions,
+    bulk: BulkActions,
     onLaunch: (AppInfo) -> Unit,
     onOpenSettings: () -> Unit,
     onGroupByCategoryChange: (Boolean) -> Unit,
@@ -113,17 +117,40 @@ fun DrawerScreen(
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var menuApp by remember { mutableStateOf<AppInfo?>(null) }
-    val searching = query.isNotBlank()
-    // Categories mode shows category cards; tapping one opens that category's apps (id survives rotation).
+
+    // ---- selecting several apps (V4.5) ----
+    var selecting by rememberSaveable { mutableStateOf(false) }
+    var selection by rememberSaveable(stateSaver = BulkSelectionSaver) { mutableStateOf(BulkSelection()) }
+    val enterSelection: (AppInfo?) -> Unit = { first ->
+        query = ""
+        selecting = true
+        selection = if (first != null) BulkSelection().add(first.packageName) else BulkSelection()
+    }
+    val exitSelection: () -> Unit = { selecting = false; selection = BulkSelection() }
+    // Leaving selection mode is always one Back press away.
+    BackHandler(enabled = selecting) { exitSelection() }
+    // Apps that disappear meanwhile (uninstalled, hidden) are dropped so the count never lies.
+    LaunchedEffect(apps) {
+        if (selecting) selection = selection.retainOnly(apps.mapTo(HashSet()) { it.packageName })
+    }
+    val tapApp: (AppInfo) -> Unit = { app -> if (selecting) selection = selection.toggle(app.packageName) else onLaunch(app) }
+    val holdApp: (AppInfo) -> Unit = { app -> if (selecting) selection = selection.toggle(app.packageName) else menuApp = app }
+    val selectedOf: (AppInfo) -> Boolean? = { app -> if (selecting) app.packageName in selection else null }
+
+    val searching = query.isNotBlank() && !selecting
+    // Categories mode shows one category at a time; swiping moves between them. The id of the category on
+    // screen is remembered (and survives rotation), so list changes never throw the user to another page.
     var openCategoryId by rememberSaveable { mutableStateOf<String?>(null) }
     val grouped = smart.groupDrawerByCategory && !searching
-    val openGroup = if (grouped) categoryGroups.firstOrNull { it.entry.category.id == openCategoryId } else null
-    // Back from an opened category returns to the cards instead of leaving the drawer.
-    BackHandler(enabled = openGroup != null) { openCategoryId = null }
-    // The category emptied (apps hidden/uninstalled): fall back to the cards.
-    LaunchedEffect(openGroup, grouped) {
-        if (grouped && openCategoryId != null && openGroup == null) openCategoryId = null
+    val groupIds = remember(categoryGroups) { categoryGroups.map { it.entry.category.id } }
+    val pagerState = rememberPagerState(initialPage = groupIds.indexOf(openCategoryId).coerceAtLeast(0)) { groupIds.size }
+    LaunchedEffect(groupIds) {
+        val index = groupIds.indexOf(openCategoryId)
+        if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
+        snapshotFlow { pagerState.settledPage }.collect { page -> groupIds.getOrNull(page)?.let { openCategoryId = it } }
     }
+    var showCategoryJump by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     // Plain A-Z list used by the alphabet index and the non-search views (search has its own results).
     val results = apps
     // Smart Search 2.0 results; only computed while the user is typing.
@@ -180,7 +207,28 @@ fun DrawerScreen(
         color = MaterialTheme.colorScheme.surface.copy(alpha = drawerOpacity),
     ) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            Row(
+            if (selecting) {
+                // Listed apps are what "Select all" means: the open category, or the whole All Apps list.
+                val listed = if (smart.groupDrawerByCategory) {
+                    categoryGroups.getOrNull(pagerState.currentPage)?.apps.orEmpty()
+                } else {
+                    results
+                }
+                val listedIds = remember(listed) { listed.map { it.packageName } }
+                SelectionTopBar(
+                    count = selection.count,
+                    allSelected = selection.allSelected(listedIds),
+                    onToggleAll = {
+                        selection = if (selection.allSelected(listedIds)) {
+                            BulkSelection(selection.packages - listedIds.toSet())
+                        } else {
+                            BulkSelection((selection.packages + listedIds).distinct())
+                        }
+                    },
+                    onClear = { selection = BulkSelection() },
+                    onCancel = exitSelection,
+                )
+            } else Row(
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -205,16 +253,18 @@ fun DrawerScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { searchResults.firstOrNull()?.let(activate) }),
                 )
+                IconButton(onClick = { enterSelection(null) }) {
+                    Icon(Icons.Default.Check, contentDescription = "Select several apps")
+                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Default.Settings, contentDescription = "Launcher settings")
                 }
             }
 
-            if (!searching) {
+            if (!searching && !selecting) {
                 DrawerModeTabs(
                     categoriesMode = smart.groupDrawerByCategory,
                     onSelect = { categories ->
-                        openCategoryId = null
                         onGroupByCategoryChange(categories)
                     },
                 )
@@ -234,10 +284,10 @@ fun DrawerScreen(
                     map
                 }
                 val endPadding = if (showIndex) 28.dp else 8.dp
-                val showSuggested = smart.smartSuggestions && query.isEmpty() && openGroup == null && suggestedApps.isNotEmpty() && maxHeight > 520.dp
+                val showSuggested = smart.smartSuggestions && query.isEmpty() && !selecting && suggestedApps.isNotEmpty() && maxHeight > 520.dp
                 // When suggestions are shown the other shortcut rows need a little more room.
-                val showRecent = smart.showRecentApps && query.isEmpty() && openGroup == null && recentApps.isNotEmpty() && maxHeight > (if (showSuggested) 680.dp else 520.dp)
-                val showMostUsed = query.isEmpty() && openGroup == null && mostUsedApps.isNotEmpty() && maxHeight > (if (showSuggested) 880.dp else 720.dp)
+                val showRecent = smart.showRecentApps && query.isEmpty() && !selecting && recentApps.isNotEmpty() && maxHeight > (if (showSuggested) 680.dp else 520.dp)
+                val showMostUsed = query.isEmpty() && !selecting && mostUsedApps.isNotEmpty() && maxHeight > (if (showSuggested) 880.dp else 720.dp)
 
                 Column(Modifier.fillMaxSize()) {
                 if (showSuggested) ShortcutRow("Suggested", suggestedApps, iconSize, settings.showLabels, onLaunch) { menuApp = it }
@@ -260,86 +310,52 @@ fun DrawerScreen(
                             subtitle = "All categories are hidden or empty. Switch to All Apps, or change this in Settings > App categories.",
                             modifier = Modifier.fillMaxSize(),
                         )
-                    } else if (openGroup == null) {
-                        CategoryCardGrid(
-                            groups = categoryGroups,
-                            animate = settings.animations,
-                            onOpen = { openCategoryId = it.entry.category.id },
-                            modifier = Modifier.fillMaxSize(),
-                        )
                     } else {
-                        // Swiping sideways inside a category moves to the next/previous one. Vertical scrolling and
-                        // taps are untouched: only a mostly-horizontal drag past the threshold counts.
-                        val orderedIds = remember(categoryGroups) { categoryGroups.map { it.entry.category.id } }
-                        val thresholdPx = with(LocalDensity.current) { 72.dp.toPx() }
-                        val animate = settings.animations
-                        val currentIds by rememberUpdatedState(orderedIds)
-                        val currentOpen by rememberUpdatedState(openGroup.entry.category.id)
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .pointerInput(thresholdPx) {
-                                    var total = 0f
-                                    detectHorizontalDragGestures(
-                                        onDragStart = { total = 0f },
-                                        onDragCancel = { total = 0f },
-                                        onDragEnd = {
-                                            CategorySwipe.target(currentIds, currentOpen, total, thresholdPx)
-                                                ?.let { openCategoryId = it }
-                                            total = 0f
-                                        },
-                                        onHorizontalDrag = { _, dragAmount -> total += dragAmount },
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            key = { groupIds.getOrNull(it) ?: it },
+                        ) { page ->
+                            val group = categoryGroups.getOrNull(page)
+                            if (group != null) {
+                                Column(Modifier.fillMaxSize()) {
+                                    CategoryPageHeader(
+                                        entry = group.entry,
+                                        appCount = group.apps.size,
+                                        index = page,
+                                        total = categoryGroups.size,
+                                        onJump = { showCategoryJump = true },
                                     )
-                                },
-                        ) {
-                            AnimatedContent(
-                                targetState = openGroup.entry.category.id,
-                                transitionSpec = {
-                                    if (!animate) {
-                                        EnterTransition.None togetherWith ExitTransition.None
-                                    } else {
-                                        val forward = orderedIds.indexOf(targetState) > orderedIds.indexOf(initialState)
-                                        val dir = if (forward) 1 else -1
-                                        (slideInHorizontally(tween(180)) { it / 4 * dir } + fadeIn(tween(180))) togetherWith
-                                            (slideOutHorizontally(tween(140)) { -it / 4 * dir } + fadeOut(tween(100)))
-                                    }
-                                },
-                                label = "category",
-                                modifier = Modifier.fillMaxSize(),
-                            ) { categoryId ->
-                                val group = categoryGroups.firstOrNull { it.entry.category.id == categoryId }
-                                if (group != null) {
-                                    Column(Modifier.fillMaxSize()) {
-                                        CategoryAppsHeader(group, onBack = { openCategoryId = null })
-                                        if (group.apps.isEmpty()) {
-                                            EmptyState(title = "No apps in this category", modifier = Modifier.fillMaxSize())
-                                        } else if (settings.drawerLayout == DrawerLayout.GRID) {
-                                            LazyVerticalGrid(
-                                                columns = GridCells.Fixed(settings.columns),
-                                                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 16.dp),
-                                                modifier = Modifier.weight(1f).fillMaxWidth(),
-                                            ) {
-                                                items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
-                                                    AppTile(
-                                                        app = app,
-                                                        iconSize = iconSize,
-                                                        showLabel = settings.showLabels,
-                                                        onClick = { onLaunch(app) },
-                                                        onLongClick = { menuApp = app },
-                                                    )
-                                                }
+                                    if (group.apps.isEmpty()) {
+                                        EmptyState(title = "No apps in this category", modifier = Modifier.fillMaxSize())
+                                    } else if (settings.drawerLayout == DrawerLayout.GRID) {
+                                        LazyVerticalGrid(
+                                            columns = GridCells.Fixed(settings.columns),
+                                            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 16.dp),
+                                            modifier = Modifier.weight(1f).fillMaxWidth(),
+                                        ) {
+                                            items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
+                                                AppTile(
+                                                    app = app,
+                                                    iconSize = iconSize,
+                                                    showLabel = settings.showLabels,
+                                                    onClick = { tapApp(app) },
+                                                    onLongClick = { holdApp(app) },
+                                                    selected = selectedOf(app),
+                                                )
                                             }
-                                        } else {
-                                            LazyColumn(contentPadding = PaddingValues(bottom = 16.dp), modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                                items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
-                                                    AppRow(
-                                                        app = app,
-                                                        iconSize = iconSize,
-                                                        showLabel = settings.showLabels,
-                                                        onClick = { onLaunch(app) },
-                                                        onLongClick = { menuApp = app },
-                                                    )
-                                                }
+                                        }
+                                    } else {
+                                        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp), modifier = Modifier.weight(1f).fillMaxWidth()) {
+                                            items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
+                                                AppRow(
+                                                    app = app,
+                                                    iconSize = iconSize,
+                                                    showLabel = settings.showLabels,
+                                                    onClick = { tapApp(app) },
+                                                    onLongClick = { holdApp(app) },
+                                                    selected = selectedOf(app),
+                                                )
                                             }
                                         }
                                     }
@@ -364,8 +380,9 @@ fun DrawerScreen(
                                 app = app,
                                 iconSize = iconSize,
                                 showLabel = settings.showLabels,
-                                onClick = { onLaunch(app) },
-                                onLongClick = { menuApp = app },
+                                onClick = { tapApp(app) },
+                                onLongClick = { holdApp(app) },
+                                selected = selectedOf(app),
                             )
                         }
                     }
@@ -380,8 +397,9 @@ fun DrawerScreen(
                                 app = app,
                                 iconSize = iconSize,
                                 showLabel = settings.showLabels,
-                                onClick = { onLaunch(app) },
-                                onLongClick = { menuApp = app },
+                                onClick = { tapApp(app) },
+                                onLongClick = { holdApp(app) },
+                                selected = selectedOf(app),
                             )
                         }
                     }
@@ -408,13 +426,53 @@ fun DrawerScreen(
                 }
                 }
             }
+
+            if (selecting) {
+                val selectedApps = remember(selection, apps) {
+                    val byPackage = apps.associateBy { it.packageName }
+                    selection.packages.mapNotNull { byPackage[it] }
+                }
+                BulkActionBar(selected = selectedApps, actions = bulk, onFinished = exitSelection)
+            }
         }
     }
 
     }
 
     menuApp?.let { app ->
-        AppActionsDialog(app, menu, showMove = false, onDismiss = { menuApp = null })
+        AppActionsDialog(
+            app, menu, showMove = false,
+            onDismiss = { menuApp = null },
+            onSelect = { enterSelection(app) },
+        )
+    }
+
+    if (showCategoryJump) {
+        AlertDialog(
+            onDismissRequest = { showCategoryJump = false },
+            title = { Text("Go to category") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    categoryGroups.forEachIndexed { i, group ->
+                        Text(
+                            "${CategoryVisuals.emoji(group.entry)}  ${group.entry.displayName} (${group.apps.size})",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .clickable {
+                                    showCategoryJump = false
+                                    scope.launch { pagerState.animateScrollToPage(i) }
+                                }
+                                .padding(vertical = 12.dp, horizontal = 4.dp),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (i == pagerState.currentPage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showCategoryJump = false }) { Text("Close") } },
+        )
     }
 }
 
@@ -448,3 +506,9 @@ private fun ShortcutRow(
         }
     }
 }
+
+/** Keeps the selected apps (in order) across rotation. */
+private val BulkSelectionSaver = listSaver<BulkSelection, String>(
+    save = { it.packages },
+    restore = { BulkSelection(it) },
+)
