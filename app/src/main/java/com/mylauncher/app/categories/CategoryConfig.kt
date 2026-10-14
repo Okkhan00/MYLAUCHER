@@ -3,8 +3,17 @@ package com.mylauncher.app.categories
 import com.mylauncher.app.data.model.AppInfo
 
 /** User customization of one category: optional custom name and whether it is hidden. */
-data class CategoryEntry(val category: AppCategory, val customName: String? = null, val hidden: Boolean = false) {
+data class CategoryEntry(
+    val category: AppCategory,
+    val customName: String? = null,
+    val hidden: Boolean = false,
+    /** Icon chosen when a custom category was created (one of [CategoryVisuals.choices]). */
+    val emoji: String? = null,
+) {
     val displayName: String get() = customName?.takeIf { it.isNotBlank() } ?: category.defaultName
+
+    /** Built-in categories are always active; a custom slot is active once it has been given a name. */
+    val isActive: Boolean get() = !category.isCustom || !customName.isNullOrBlank()
 }
 
 /** Ordered list of every category exactly once. Order, names and visibility are user-controlled. */
@@ -19,8 +28,13 @@ data class CategoryConfig(val entries: List<CategoryEntry> = defaultEntries()) {
     }
 
     fun rename(category: AppCategory, name: String?): CategoryConfig = update(category) {
-        it.copy(customName = CategoryCodec.sanitizeName(name))
+        val clean = CategoryCodec.sanitizeName(name)
+        // A user-created category cannot lose its name (that would delete it); delete it explicitly instead.
+        if (category.isCustom && clean == null) it else it.copy(customName = clean)
     }
+
+    /** Categories that exist: the built-in ones and the custom ones the user created, in display order. */
+    val activeEntries: List<CategoryEntry> get() = normalized().entries.filter { it.isActive }
 
     fun setHidden(category: AppCategory, hidden: Boolean): CategoryConfig = update(category) { it.copy(hidden = hidden) }
 
@@ -63,8 +77,13 @@ object CategoryOrganizer {
         config: CategoryConfig,
         includeHidden: Boolean = false,
     ): List<CategoryGroup> {
-        val byCategory = apps.groupBy { categoryOf(it, overrides) }
-        return config.normalized().entries
+        val active = config.normalized().entries.filter { it.isActive }
+        val activeCategories = active.mapTo(HashSet()) { it.category }
+        // A manual choice that points at a deleted custom category falls back to the automatic category.
+        val byCategory = apps.groupBy { app ->
+            overrides[app.packageName]?.takeIf { it in activeCategories } ?: AppCategorizer.categorize(app)
+        }
+        return active
             .filter { includeHidden || !it.hidden }
             .mapNotNull { entry ->
                 byCategory[entry.category]?.takeIf { it.isNotEmpty() }
@@ -82,7 +101,9 @@ object CategoryCodec {
 
     /** One category per line: id TAB customName TAB hidden(0/1). Order of lines is the display order. */
     fun encodeConfig(config: CategoryConfig): String = config.normalized().entries.joinToString("\n") {
-        "${it.category.id}\t${it.customName.orEmpty()}\t${if (it.hidden) 1 else 0}"
+        val base = "${it.category.id}\t${it.customName.orEmpty()}\t${if (it.hidden) 1 else 0}"
+        // The icon is an optional fourth field, so data saved by earlier versions still reads the same.
+        if (it.emoji != null && it.emoji in CategoryVisuals.choices) "$base\t${it.emoji}" else base
     }
 
     fun decodeConfig(raw: String?): CategoryConfig {
@@ -90,7 +111,12 @@ object CategoryCodec {
         val entries = raw.lineSequence().mapNotNull { line ->
             val p = line.split("\t")
             val category = AppCategory.fromId(p.getOrNull(0)) ?: return@mapNotNull null
-            CategoryEntry(category, sanitizeName(p.getOrNull(1)), p.getOrNull(2) == "1")
+            CategoryEntry(
+                category,
+                sanitizeName(p.getOrNull(1)),
+                p.getOrNull(2) == "1",
+                p.getOrNull(3)?.takeIf { it in CategoryVisuals.choices },
+            )
         }.toList()
         return CategoryConfig(entries).normalized()
     }
@@ -108,5 +134,45 @@ object CategoryCodec {
             if (p.size == 2 && p[0].isNotBlank() && category != null) out[p[0]] = category
         }
         return out
+    }
+}
+
+/** Rules for categories the user creates. Pure, so they are unit tested. */
+object CategoryRules {
+    val MAX_CUSTOM: Int = AppCategory.entries.count { it.isCustom }
+
+    sealed interface CreateResult {
+        data class Ok(val config: CategoryConfig, val category: AppCategory) : CreateResult
+        data class Rejected(val message: String) : CreateResult
+    }
+
+    /** True when [name] (case-insensitive) is already the name of an existing category other than [except]. */
+    fun nameTaken(config: CategoryConfig, name: String, except: AppCategory? = null): Boolean {
+        val wanted = name.trim()
+        return config.activeEntries.any { it.category != except && it.displayName.equals(wanted, ignoreCase = true) }
+    }
+
+    fun create(config: CategoryConfig, rawName: String, emoji: String? = null): CreateResult {
+        val name = CategoryCodec.sanitizeName(rawName) ?: return CreateResult.Rejected("Enter a name for the category.")
+        if (nameTaken(config, name)) return CreateResult.Rejected("A category called \"$name\" already exists.")
+        val normalized = config.normalized()
+        val slot = normalized.entries.firstOrNull { it.category.isCustom && !it.isActive }
+            ?: return CreateResult.Rejected("You can create up to $MAX_CUSTOM categories of your own.")
+        val created = slot.copy(
+            customName = name,
+            hidden = false,
+            emoji = emoji?.takeIf { it in CategoryVisuals.choices },
+        )
+        // New categories go to the end of the list, after everything the user already arranged.
+        val entries = normalized.entries.filterNot { it.category == slot.category } + created
+        return CreateResult.Ok(CategoryConfig(entries), slot.category)
+    }
+
+    /** Frees a user-created category's slot. Built-in categories cannot be deleted. */
+    fun delete(config: CategoryConfig, category: AppCategory): CategoryConfig {
+        if (!category.isCustom) return config
+        return CategoryConfig(config.normalized().entries.map {
+            if (it.category == category) CategoryEntry(category) else it
+        })
     }
 }
