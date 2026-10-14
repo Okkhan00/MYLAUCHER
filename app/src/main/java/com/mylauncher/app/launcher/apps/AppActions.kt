@@ -28,8 +28,19 @@ object AppActions {
 
     /** Uses the standard system uninstall confirmation. */
     fun uninstall(context: Context, packageName: String) {
-        val intent = Intent(Intent.ACTION_DELETE, Uri.fromParts("package", packageName, null))
-        start(context, intent, "Can't uninstall this app")
+        if (packageName == context.packageName) {
+            toast(context, "My Launcher can't uninstall itself from here")
+            return
+        }
+        if (!isInstalled(context, packageName)) {
+            toast(context, "This app is no longer installed")
+            return
+        }
+        if (isSystemApp(context, packageName)) {
+            toast(context, "This app came with your phone and can't be uninstalled here")
+            return
+        }
+        start(context, uninstallIntent(packageName), "Can't uninstall this app")
     }
 
     /**

@@ -10,6 +10,11 @@
         tools:ignore="ProtectedPermissions" />
     <!-- Android 13+: lets the "time is up" reminder show. Asked for only when the timer is turned on, and optional. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Required since Android 9 (API 28) for any app that asks Android to uninstall another app
+         (Intent.ACTION_DELETE). Without it the system refuses the request and shows an error.
+         It is a normal install-time permission: no prompt, and it does NOT allow silent uninstalling.
+         Android still shows its own confirmation screen every time. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
 
     <!-- QUERY_ALL_PACKAGES is deliberately not used:
          the <queries> block below is enough to list launchable apps and home apps. -->

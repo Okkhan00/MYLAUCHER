@@ -6,6 +6,13 @@ data class ReleaseNote(val version: String, val title: String, val points: List<
 object VersionHistory {
     val releases: List<ReleaseNote> = listOf(
         ReleaseNote(
+            "4.5.1", "Uninstall fix",
+            listOf(
+                "Fixed uninstalling apps: Android now accepts the request and shows its confirmation screen",
+                "Clear messages for apps that can't be uninstalled here",
+            ),
+        ),
+        ReleaseNote(
             "4.5", "Select several apps",
             listOf(
                 "Select several apps and change their category, add to favorites, hide, lock, move to a folder or uninstall them together",
