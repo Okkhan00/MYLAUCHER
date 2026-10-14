@@ -4,6 +4,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
 import com.mylauncher.app.categories.AppCategory
 import com.mylauncher.app.categories.CategoryConfig
+import com.mylauncher.app.categories.CategoryRules
 import com.mylauncher.app.data.model.BlurLevel
 import com.mylauncher.app.data.model.LauncherSettings
 import com.mylauncher.app.data.model.OverlayStyle
@@ -81,6 +82,7 @@ class Phase3PreferencesTest {
             customSearchUrl = "https://example.org/?q=%s",
             searchSettingsShortcuts = false,
             groupDrawerByCategory = true,
+            showRecentApps = false,
         )
         prefs.saveSmartSettings(custom)
         assertEquals(custom, prefs.smartSettings.first())
@@ -166,5 +168,35 @@ class Phase3PreferencesTest {
         prefs.hide("x") // private apps reuse the Phase 2 hidden list
         assertEquals(setOf("x"), prefs.hidden.first())
         assertEquals(setOf("a"), prefs.lockedApps.first())
+    }
+
+    @Test fun bulkFavoritesHideAndLockPersistWithoutDuplicates() = runBlocking {
+        prefs.addFavorites(listOf("a", "b", "a"))
+        assertEquals(listOf("a", "b"), prefs.favorites.first())
+        prefs.hideAll(listOf("b", "c"))
+        assertEquals(setOf("b", "c"), prefs.hidden.first())
+        assertEquals(listOf("a"), prefs.favorites.first()) // hiding removes from the home screen
+        prefs.unhideAll(listOf("b"))
+        assertEquals(setOf("c"), prefs.hidden.first())
+        prefs.setAppsLocked(listOf("x", "y"), true)
+        prefs.setAppsLocked(listOf("x"), false)
+        assertEquals(setOf("y"), prefs.lockedApps.first())
+        prefs.removeFavorites(listOf("a"))
+        assertTrue(prefs.favorites.first().isEmpty())
+    }
+
+    @Test fun bulkCategoryAssignmentAndNewCategoryPersist() = runBlocking {
+        prefs.setCategoryOverrides(listOf("a", "b"), AppCategory.GAMES)
+        assertEquals(mapOf("a" to AppCategory.GAMES, "b" to AppCategory.GAMES), prefs.categoryOverrides.first())
+        val created = CategoryRules.create(CategoryConfig(), "Kids") as CategoryRules.CreateResult.Ok
+        prefs.saveCategoryWithApps(created.config, listOf("a", "c"), created.category)
+        assertEquals("Kids", prefs.categoryConfig.first().entryFor(created.category).displayName)
+        assertEquals(created.category, prefs.categoryOverrides.first()["a"])
+        assertEquals(AppCategory.GAMES, prefs.categoryOverrides.first()["b"])
+        prefs.deleteCustomCategory(created.category)
+        assertFalse(prefs.categoryConfig.first().entryFor(created.category).isActive)
+        assertEquals(mapOf("b" to AppCategory.GAMES), prefs.categoryOverrides.first())
+        prefs.setCategoryOverrides(listOf("b"), null)
+        assertTrue(prefs.categoryOverrides.first().isEmpty())
     }
 }
