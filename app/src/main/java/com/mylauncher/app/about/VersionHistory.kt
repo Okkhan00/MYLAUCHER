@@ -6,6 +6,15 @@ data class ReleaseNote(val version: String, val title: String, val points: List<
 object VersionHistory {
     val releases: List<ReleaseNote> = listOf(
         ReleaseNote(
+            "4.6", "Customize home screen and drawer",
+            listOf(
+                "Customize home screen page with live preview: apps per row, icon size, app names and an optional dock",
+                "Customize app drawer page with its own layout, grid, icon size and names, independent from the home screen",
+                "Long-press a home icon and drag it to a new place in the grid; letting go without moving still opens the menu",
+                "Reset buttons that change only the layout settings",
+            ),
+        ),
+        ReleaseNote(
             "4.5.1", "Uninstall fix",
             listOf(
                 "Fixed uninstalling apps: Android now accepts the request and shows its confirmation screen",

@@ -61,6 +61,8 @@ import com.mylauncher.app.launcher.setup.rememberDefaultLauncherController
 import com.mylauncher.app.security.LockScreen
 import com.mylauncher.app.security.biometric.BiometricHelper
 import com.mylauncher.app.settings.CategoriesScreen
+import com.mylauncher.app.settings.CustomizeDrawerScreen
+import com.mylauncher.app.settings.CustomizeHomeScreen
 import com.mylauncher.app.settings.HiddenAppsScreen
 import com.mylauncher.app.settings.SecurityScreen
 import com.mylauncher.app.settings.SettingsScreen
@@ -81,6 +83,8 @@ enum class Screen(val parent: Screen?) {
     SECURITY(SETTINGS),
     CATEGORIES(SETTINGS),
     INSIGHTS(SETTINGS),
+    CUSTOMIZE_HOME(SETTINGS),
+    CUSTOMIZE_DRAWER(SETTINGS),
     THEMES(SETTINGS),
     WALLPAPER(SETTINGS),
     APP_LOCK(SETTINGS),
@@ -95,7 +99,8 @@ internal fun requiresUnlock(screen: Screen, security: SecuritySettings): Boolean
     if (!security.lockEnabled) return false
     return when (screen) {
         Screen.SETTINGS, Screen.SETUP, Screen.CATEGORIES, Screen.INSIGHTS,
-        Screen.THEMES, Screen.WALLPAPER, Screen.APP_LOCK, Screen.BACKUP, Screen.DASHBOARD, Screen.TIMER -> security.protectSettings
+        Screen.THEMES, Screen.WALLPAPER, Screen.APP_LOCK, Screen.BACKUP, Screen.DASHBOARD, Screen.TIMER,
+        Screen.CUSTOMIZE_HOME, Screen.CUSTOMIZE_DRAWER -> security.protectSettings
         Screen.HIDDEN, Screen.PRIVATE -> security.protectHidden
         Screen.SECURITY -> true
         Screen.HOME, Screen.DRAWER -> false
@@ -112,6 +117,8 @@ fun LauncherApp(vm: LauncherViewModel) {
     val allApps by vm.allApps.collectAsStateWithLifecycle()
     val entries by vm.homeEntries.collectAsStateWithLifecycle()
     val favoriteIds by vm.favoriteIds.collectAsStateWithLifecycle()
+    val dockIds by vm.dockIds.collectAsStateWithLifecycle()
+    val dockApps by vm.dockApps.collectAsStateWithLifecycle()
     val folders by vm.folders.collectAsStateWithLifecycle()
     val hiddenIds by vm.hiddenIds.collectAsStateWithLifecycle()
     val recentApps by vm.recentApps.collectAsStateWithLifecycle()
@@ -267,6 +274,7 @@ fun LauncherApp(vm: LauncherViewModel) {
             // Rebuilt only when something it shows changes, not on every recomposition of this screen.
             val menu = remember(
                 favoriteIds, folders, hiddenIds, sec.lockEnabled, lockedApps, categoryConfig, categoryOverrides, launchApp, vm,
+                dockIds, dockApps, s.dockCount,
             ) {
                 AppMenuActions(
                     favoriteIds = favoriteIds,
@@ -285,6 +293,11 @@ fun LauncherApp(vm: LauncherViewModel) {
                     categories = categoryConfig.activeEntries,
                     categoryOf = { app -> CategoryOrganizer.categoryOf(app, categoryOverrides) },
                     setCategory = vm::setCategory,
+                    dockIds = dockIds,
+                    dockCapacity = s.dockCount,
+                    dockFull = dockApps.size >= s.dockCount,
+                    toggleDock = vm::toggleDock,
+                    moveDock = vm::moveDock,
                 )
             }
 
@@ -460,6 +473,8 @@ fun LauncherApp(vm: LauncherViewModel) {
                                 null
                             },
                             onAddWidget = { showWidgetPicker = true },
+                            dockApps = dockApps,
+                            onOpenCustomize = { screen = Screen.CUSTOMIZE_HOME },
                         )
                         Screen.DRAWER -> DrawerScreen(
                             apps = visibleApps,
@@ -530,7 +545,20 @@ fun LauncherApp(vm: LauncherViewModel) {
                                 else -> "${timerState.timers.size} app" + if (timerState.timers.size == 1) "" else "s"
                             },
                             onOpenTimer = { screen = Screen.TIMER },
+                            onOpenCustomizeHome = { screen = Screen.CUSTOMIZE_HOME },
+                            onOpenCustomizeDrawer = { screen = Screen.CUSTOMIZE_DRAWER },
                             scrollState = settingsScroll,
+                        )
+                        Screen.CUSTOMIZE_HOME -> CustomizeHomeScreen(
+                            settings = s,
+                            onChange = vm::saveSettings,
+                            onOpenThemes = { screen = Screen.THEMES },
+                            onBack = { screen = Screen.SETTINGS },
+                        )
+                        Screen.CUSTOMIZE_DRAWER -> CustomizeDrawerScreen(
+                            settings = s,
+                            onChange = vm::saveSettings,
+                            onBack = { screen = Screen.SETTINGS },
                         )
                         Screen.TIMER -> TimerScreen(
                             state = timerState,

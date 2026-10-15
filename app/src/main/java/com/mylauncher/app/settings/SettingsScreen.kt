@@ -27,7 +27,6 @@ import com.mylauncher.app.about.VersionHistory
 import com.mylauncher.app.data.model.ClockStyle
 import com.mylauncher.app.data.model.DrawerLayout
 import com.mylauncher.app.data.model.GestureAction
-import com.mylauncher.app.data.model.IconSize
 import com.mylauncher.app.data.model.LauncherSettings
 import com.mylauncher.app.data.model.SmartSettings
 import com.mylauncher.app.launcher.setup.DefaultLauncherController
@@ -78,6 +77,8 @@ fun SettingsScreen(
     onOpenDashboard: () -> Unit,
     timerSummary: String,
     onOpenTimer: () -> Unit,
+    onOpenCustomizeHome: () -> Unit,
+    onOpenCustomizeDrawer: () -> Unit,
     /** Owned by the launcher so the scroll position survives opening a section and coming back. */
     scrollState: ScrollState,
 ) {
@@ -123,24 +124,11 @@ fun SettingsScreen(
                 }
 
                 SettingsGroup("Home screen", "🏠") {
-                    SettingChoice(
-                        "Apps per row",
-                        listOf(4 to "4", 5 to "5", 6 to "6"),
-                        settings.columns,
-                        { onChange(settings.copy(columns = it)) },
-                        subtitle = "On the home screen and in the app drawer",
-                    )
-                    SettingDivider()
-                    SettingChoice(
-                        "Icon size",
-                        listOf(IconSize.SMALL to "Small", IconSize.MEDIUM to "Medium", IconSize.LARGE to "Large"),
-                        settings.iconSize,
-                        { onChange(settings.copy(iconSize = it)) },
-                    )
-                    SettingDivider()
-                    SettingSwitch(
-                        "Show app names", settings.showLabels, { onChange(settings.copy(showLabels = it)) },
-                        subtitle = "Names under icons on the home screen and in the drawer",
+                    SettingRow(
+                        "Customize home screen",
+                        onClick = onOpenCustomizeHome,
+                        subtitle = "Grid, icon size, app names and dock, with a live preview",
+                        value = "${settings.homeColumns} per row",
                     )
                     SettingDivider()
                     SettingChoice(
@@ -169,12 +157,11 @@ fun SettingsScreen(
                         subtitle = "You can also switch at the top of the drawer. Categories shows one category at a time: swipe sideways to change.",
                     )
                     SettingDivider()
-                    SettingChoice(
-                        "Layout",
-                        listOf(DrawerLayout.GRID to "Grid", DrawerLayout.LIST to "List"),
-                        settings.drawerLayout,
-                        { onChange(settings.copy(drawerLayout = it)) },
-                        subtitle = "For All Apps and inside a category",
+                    SettingRow(
+                        "Customize app drawer",
+                        onClick = onOpenCustomizeDrawer,
+                        subtitle = "Layout, grid, icon size and app names for the drawer, with a live preview",
+                        value = if (settings.drawerLayout == DrawerLayout.LIST) "List" else "${settings.columns} per row",
                     )
                     SettingDivider()
                     SettingRow(

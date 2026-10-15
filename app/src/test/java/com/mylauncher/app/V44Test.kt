@@ -61,7 +61,7 @@ class V44Test {
 
     @Test fun versionHistoryIsNewestFirstAndEveryEntryHasContent() {
         val releases = VersionHistory.releases
-        assertEquals("4.5.1", releases.first().version)
+        assertEquals("4.6", releases.first().version)
         assertTrue(releases.all { it.points.isNotEmpty() && it.title.isNotBlank() })
         assertEquals(releases.map { it.version }.distinct(), releases.map { it.version })
     }

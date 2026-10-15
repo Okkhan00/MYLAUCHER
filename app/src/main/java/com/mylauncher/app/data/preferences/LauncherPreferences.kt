@@ -29,6 +29,7 @@ import com.mylauncher.app.backup.BackupType
 import com.mylauncher.app.widgets.HostedWidget
 import com.mylauncher.app.widgets.WidgetCodec
 import com.mylauncher.app.data.model.SmartSettings
+import com.mylauncher.app.launcher.home.DockOps
 import com.mylauncher.app.data.model.folderToken
 import java.io.IOException
 import java.util.UUID
@@ -100,6 +101,13 @@ internal object PrefKeys {
 
     val PERFORMANCE_MODE = stringPreferencesKey("performance_mode")
 
+    // V4.6: independent home screen layout and the dock (new keys only; older keys keep their meaning)
+    val HOME_COLUMNS = intPreferencesKey("home_columns")
+    val HOME_ICON_SIZE = stringPreferencesKey("home_icon_size")
+    val HOME_SHOW_LABELS = booleanPreferencesKey("home_show_labels")
+    val DOCK_COUNT = intPreferencesKey("dock_count")
+    val DOCK = stringPreferencesKey("dock")
+
     // Widgets: placed widgets, and an id that was allocated but not yet confirmed (cleaned up on next start)
     val WIDGETS = stringPreferencesKey("widgets")
     val WIDGET_PENDING = intPreferencesKey("widget_pending_id")
@@ -139,6 +147,10 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
                 trackLaunches = p[PrefKeys.TRACK_LAUNCHES] ?: d.trackLaunches,
                 onboardingDone = p[PrefKeys.ONBOARDING_DONE] ?: d.onboardingDone,
                 performance = parseEnum(p[PrefKeys.PERFORMANCE_MODE], d.performance),
+                homeColumns = LauncherSettings.resolveColumns(p[PrefKeys.HOME_COLUMNS], p[PrefKeys.COLUMNS]),
+                homeIconSize = parseEnum(p[PrefKeys.HOME_ICON_SIZE], parseEnum(p[PrefKeys.ICON_SIZE], d.homeIconSize)),
+                homeShowLabels = p[PrefKeys.HOME_SHOW_LABELS] ?: p[PrefKeys.SHOW_LABELS] ?: d.homeShowLabels,
+                dockCount = (p[PrefKeys.DOCK_COUNT] ?: d.dockCount).coerceIn(0, LauncherSettings.MAX_DOCK),
             )
         }
         .catch { emit(LauncherSettings()) }
@@ -240,8 +252,54 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
             p[PrefKeys.TRACK_LAUNCHES] = s.trackLaunches
             p[PrefKeys.ONBOARDING_DONE] = s.onboardingDone
             p[PrefKeys.PERFORMANCE_MODE] = s.performance.name
+            p[PrefKeys.HOME_COLUMNS] = s.homeColumns.coerceIn(LauncherSettings.MIN_COLUMNS, LauncherSettings.MAX_COLUMNS)
+            p[PrefKeys.HOME_ICON_SIZE] = s.homeIconSize.name
+            p[PrefKeys.HOME_SHOW_LABELS] = s.homeShowLabels
+            val dockCount = s.dockCount.coerceIn(0, LauncherSettings.MAX_DOCK)
+            p[PrefKeys.DOCK_COUNT] = dockCount
+            // A smaller dock sends the apps that no longer fit back to the home grid; nothing is lost.
+            val (keep, returned) = DockOps.shrink(ListCodec.decode(p[PrefKeys.DOCK]), dockCount)
+            if (returned.isNotEmpty()) {
+                p[PrefKeys.DOCK] = ListCodec.encode(keep)
+                p[PrefKeys.FAVORITES] = ListCodec.encode(
+                    returned.fold(ListCodec.decode(p[PrefKeys.FAVORITES])) { list, pkg -> ListOps.add(list, pkg) },
+                )
+            }
         }
     }
+
+    // ---- Dock (V4.6) ------------------------------------------------------------------------
+
+    val dock: Flow<List<String>> = data.map { ListCodec.decode(it[PrefKeys.DOCK]) }
+
+    /**
+     * Puts an app in the dock (one edit): it leaves the home grid and any folder. [valid] are the apps that
+     * really exist and are visible, so uninstalled or hidden apps never take up a slot. Returns false when full.
+     */
+    suspend fun addToDock(pkg: String, capacity: Int, valid: Set<String>): Boolean {
+        var added = false
+        store.edit { p ->
+            val dock = DockOps.prune(ListCodec.decode(p[PrefKeys.DOCK]), valid)
+            val next = DockOps.add(dock, pkg, capacity)
+            added = pkg in next
+            p[PrefKeys.DOCK] = ListCodec.encode(next)
+            if (added) {
+                p[PrefKeys.FAVORITES] = ListCodec.encode(ListOps.remove(ListCodec.decode(p[PrefKeys.FAVORITES]), pkg))
+                p[PrefKeys.FOLDERS] = FolderCodec.encode(FolderOps.removeAppEverywhere(FolderCodec.decode(p[PrefKeys.FOLDERS]), pkg))
+            }
+        }
+        return added
+    }
+
+    /** Takes an app out of the dock and puts it back on the home grid (one edit). */
+    suspend fun removeFromDock(pkg: String) {
+        store.edit { p ->
+            p[PrefKeys.DOCK] = ListCodec.encode(DockOps.remove(ListCodec.decode(p[PrefKeys.DOCK]), pkg))
+            p[PrefKeys.FAVORITES] = ListCodec.encode(ListOps.add(ListCodec.decode(p[PrefKeys.FAVORITES]), pkg))
+        }
+    }
+
+    suspend fun moveInDock(pkg: String, delta: Int) = editList(PrefKeys.DOCK) { DockOps.move(it, pkg, delta) }
 
     // ---- Home list (apps and folders) -------------------------------------------------------
 
@@ -250,6 +308,8 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
         store.edit { p ->
             p[PrefKeys.FAVORITES] = ListCodec.encode(ListOps.add(ListCodec.decode(p[PrefKeys.FAVORITES]), pkg))
             p[PrefKeys.FOLDERS] = FolderCodec.encode(FolderOps.removeAppEverywhere(FolderCodec.decode(p[PrefKeys.FOLDERS]), pkg))
+            // An app is either on the home grid or in the dock, never both.
+            p[PrefKeys.DOCK] = ListCodec.encode(DockOps.remove(ListCodec.decode(p[PrefKeys.DOCK]), pkg))
         }
     }
 

@@ -45,6 +45,12 @@ class AppMenuActions(
     val categories: List<CategoryEntry> = emptyList(),
     val categoryOf: (AppInfo) -> AppCategory = { AppCategory.OTHER },
     val setCategory: (AppInfo, AppCategory?) -> Unit = { _, _ -> },
+    // ---- V4.6: dock. Capacity 0 means the dock is off and no dock entries are shown. ----
+    val dockIds: List<String> = emptyList(),
+    val dockCapacity: Int = 0,
+    val dockFull: Boolean = false,
+    val toggleDock: (AppInfo) -> Unit = {},
+    val moveDock: (AppInfo, Int) -> Unit = { _, _ -> },
 )
 
 /** Long-press menu. Uses only official system screens and intents; nothing is silent or privileged. */
@@ -80,6 +86,15 @@ fun AppActionsDialog(
                 if (showMove && isFavorite) {
                     MenuItem("Move earlier") { actions.move(app, -1) }
                     MenuItem("Move later") { actions.move(app, 1) }
+                }
+                if (actions.dockCapacity > 0) {
+                    if (app.packageName in actions.dockIds) {
+                        MenuItem("Remove from dock") { actions.toggleDock(app); onDismiss() }
+                        MenuItem("Move earlier in dock") { actions.moveDock(app, -1) }
+                        MenuItem("Move later in dock") { actions.moveDock(app, 1) }
+                    } else if (!actions.dockFull) {
+                        MenuItem("Add to dock") { actions.toggleDock(app); onDismiss() }
+                    }
                 }
                 if (folder != null) {
                     MenuItem("Remove from folder \"${folder.name}\"") { actions.removeFromFolder(app, folder.id); onDismiss() }

@@ -34,6 +34,8 @@ object BackupSchema {
         "wallpaper_blur" to BackupType.STRING, "wallpaper_drawer_overlay" to BackupType.BOOLEAN,
         "locked_apps" to BackupType.STRING,
         "performance_mode" to BackupType.STRING,
+        "home_columns" to BackupType.INT, "home_icon_size" to BackupType.STRING,
+        "home_show_labels" to BackupType.BOOLEAN, "dock_count" to BackupType.INT, "dock" to BackupType.STRING,
     )
 
     /** Keys that must never appear in a backup, even if someone edits a file by hand. */

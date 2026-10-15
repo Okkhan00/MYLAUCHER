@@ -32,10 +32,25 @@ data class LauncherSettings(
     val trackLaunches: Boolean = true,
     val onboardingDone: Boolean = false,
     val performance: PerformanceMode = PerformanceMode.BALANCED,
+    // ---- V4.6: the home screen has its own grid, icon size and names. `columns`, `iconSize` and
+    // `showLabels` above now describe the app drawer (and everything that is not the home screen). ----
+    val homeColumns: Int = DEFAULT_COLUMNS,
+    val homeIconSize: IconSize = IconSize.MEDIUM,
+    val homeShowLabels: Boolean = true,
+    /** Number of dock slots; 0 means no dock (the default, so nothing changes for existing users). */
+    val dockCount: Int = 0,
 ) {
     companion object {
         const val MIN_COLUMNS = 4
         const val MAX_COLUMNS = 6
         const val DEFAULT_COLUMNS = 4
+        const val MAX_DOCK = 5
+
+        /**
+         * Home values did not exist before V4.6. When they were never saved the home screen keeps the
+         * value the user already had, so updating changes nothing visible.
+         */
+        fun resolveColumns(home: Int?, legacy: Int?): Int =
+            (home ?: legacy ?: DEFAULT_COLUMNS).coerceIn(MIN_COLUMNS, MAX_COLUMNS)
     }
 }

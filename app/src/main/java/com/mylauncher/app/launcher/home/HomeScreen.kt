@@ -5,6 +5,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -80,6 +81,9 @@ fun HomeScreen(
     /** Hosted widgets, drawn in the free space between the search bar and the favorites. */
     widgetsContent: (@Composable (Modifier) -> Unit)? = null,
     onAddWidget: (() -> Unit)? = null,
+    /** Apps in the dock, in order. Empty when the dock is off. */
+    dockApps: List<AppInfo> = emptyList(),
+    onOpenCustomize: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     var menuApp by remember { mutableStateOf<AppInfo?>(null) }
@@ -163,32 +167,75 @@ fun HomeScreen(
                     ReorderableGrid(
                         items = entries,
                         key = { it.key },
-                        columns = settings.columns,
+                        columns = settings.homeColumns,
                         reorderEnabled = reorderMode,
                         onReorder = onReorderHome,
+                        // Long press starts a drag; letting go without moving opens the menu instead.
+                        longPressDrag = !reorderMode,
+                        onItemLongPress = { entry ->
+                            when (entry) {
+                                is HomeEntry.AppEntry -> menuApp = entry.app
+                                is HomeEntry.FolderEntry -> folderMenuId = entry.folder.id
+                            }
+                        },
                         modifier = Modifier.heightIn(max = 340.dp),
-                    ) { entry, _ ->
+                    ) { entry, blockClick ->
                         when (entry) {
                             is HomeEntry.AppEntry -> AppTile(
                                 app = entry.app,
-                                iconSize = settings.iconSize.sizeDp.dp,
-                                showLabel = settings.showLabels,
+                                iconSize = settings.homeIconSize.sizeDp.dp,
+                                showLabel = settings.homeShowLabels,
                                 interactive = !reorderMode,
-                                onClick = { onLaunch(entry.app) },
-                                onLongClick = { menuApp = entry.app },
+                                onClick = { if (!blockClick) onLaunch(entry.app) },
+                                onLongClick = null,
                                 onWallpaper = true,
                             )
                             is HomeEntry.FolderEntry -> FolderTile(
                                 name = entry.folder.name,
                                 previewApps = entry.apps,
                                 appCount = entry.apps.size,
-                                iconSize = settings.iconSize.sizeDp.dp,
-                                showLabel = settings.showLabels,
+                                iconSize = settings.homeIconSize.sizeDp.dp,
+                                showLabel = settings.homeShowLabels,
                                 interactive = !reorderMode,
-                                onClick = { openFolderId = entry.folder.id },
-                                onLongClick = { folderMenuId = entry.folder.id },
+                                onClick = { if (!blockClick) openFolderId = entry.folder.id },
+                                onLongClick = null,
                                 onWallpaper = true,
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // The dock: a short row of apps along the bottom. Off by default (dock size 0).
+        val dockRow: @Composable (Modifier) -> Unit = { dockModifier ->
+            if (settings.dockCount > 0) {
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = Color.White.copy(alpha = 0.16f),
+                    modifier = dockModifier.fillMaxWidth(),
+                ) {
+                    if (dockApps.isEmpty()) {
+                        Text(
+                            "Dock: long-press an app and choose Add to dock",
+                            style = MaterialTheme.typography.labelMedium.copy(color = Color.White),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                        )
+                    } else {
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            dockApps.forEach { app ->
+                                AppTile(
+                                    app = app,
+                                    iconSize = settings.homeIconSize.sizeDp.dp,
+                                    showLabel = false,
+                                    onClick = { onLaunch(app) },
+                                    onLongClick = { menuApp = app },
+                                    onWallpaper = true,
+                                )
+                            }
                         }
                     }
                 }
@@ -221,6 +268,7 @@ fun HomeScreen(
                         SearchPill(onOpenSearch)
                     }
                     widgetsSlot(Modifier.weight(1f))
+                    dockRow(Modifier.padding(bottom = 8.dp))
                     bottomButton(Modifier)
                 }
                 favoritesArea(Modifier.weight(0.55f).fillMaxHeight().verticalScroll(rememberScrollState()))
@@ -235,6 +283,7 @@ fun HomeScreen(
                 widgetsSlot(Modifier.weight(1f))
                 favoritesArea(Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
+                dockRow(Modifier.padding(bottom = 8.dp))
                 bottomButton(Modifier.align(Alignment.CenterHorizontally))
             }
         }
@@ -247,7 +296,11 @@ fun HomeScreen(
     folderEntry(openFolderId)?.let { entry ->
         FolderDialog(
             entry = entry,
-            settings = settings,
+            settings = settings.copy(
+                columns = settings.homeColumns,
+                iconSize = settings.homeIconSize,
+                showLabels = settings.homeShowLabels,
+            ),
             selectableApps = selectableApps,
             actions = folderActions,
             onLaunch = onLaunch,
@@ -313,6 +366,7 @@ fun HomeScreen(
                     if (entries.size > 1) {
                         MenuItem("Reorder home screen") { showEdit = false; reorderMode = true }
                     }
+                    if (onOpenCustomize != null) MenuItem("Customize home screen") { showEdit = false; onOpenCustomize() }
                     MenuItem("Quick actions") { showEdit = false; showQuickActions = true }
                     MenuItem("Change wallpaper") { showEdit = false; AppActions.openWallpaperPicker(context) }
                     MenuItem("Launcher settings") { showEdit = false; onOpenSettings() }

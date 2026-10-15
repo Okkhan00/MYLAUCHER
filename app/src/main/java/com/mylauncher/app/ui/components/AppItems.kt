@@ -41,18 +41,19 @@ private fun Modifier.tileClickable(
     interactive: Boolean,
     label: String,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     selecting: Boolean = false,
 ): Modifier {
     if (!interactive) return this
     val haptic = LocalHapticFeedback.current
     return this.combinedClickable(
         onClickLabel = if (selecting) "Select or deselect $label" else "Open $label",
-        onLongClickLabel = if (selecting) "Select or deselect $label" else "More actions for $label",
-        onLongClick = {
+        onLongClickLabel = if (onLongClick == null) null else if (selecting) "Select or deselect $label" else "More actions for $label",
+        // null: the caller handles long press itself (home screen: long press starts a drag).
+        onLongClick = if (onLongClick == null) null else ({
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             onLongClick()
-        },
+        }),
         onClick = onClick,
     )
 }
@@ -105,7 +106,7 @@ fun AppTile(
     iconSize: Dp,
     showLabel: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     onWallpaper: Boolean = false,
     interactive: Boolean = true,
@@ -141,7 +142,7 @@ fun FolderTile(
     iconSize: Dp,
     showLabel: Boolean,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     onWallpaper: Boolean = false,
     interactive: Boolean = true,

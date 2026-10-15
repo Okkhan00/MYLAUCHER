@@ -97,6 +97,35 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             HomeEntry.resolve(apps, tokens, hidden, folderList)
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // ---- V4.6: dock ---------------------------------------------------------------------------
+
+    val dockIds: StateFlow<List<String>> =
+        prefs.dock.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Dock apps in order: only installed, visible apps, and never more than the dock size. */
+    val dockApps: StateFlow<List<AppInfo>> =
+        combine(visibleApps, dockIds, settings.map { it?.dockCount ?: 0 }.distinctUntilChanged()) { apps, ids, capacity ->
+            val byPackage = apps.associateBy { it.packageName }
+            ids.mapNotNull { byPackage[it] }.take(capacity)
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Adds the app to the dock, or takes it out again (it then returns to the home grid). */
+    fun toggleDock(app: AppInfo) {
+        viewModelScope.launch {
+            if (app.packageName in dockIds.value) {
+                prefs.removeFromDock(app.packageName)
+            } else {
+                val capacity = settings.value?.dockCount ?: 0
+                val valid = visibleApps.value.map { it.packageName }.toSet()
+                prefs.addToDock(app.packageName, capacity, valid)
+            }
+        }
+    }
+
+    fun moveDock(app: AppInfo, delta: Int) {
+        viewModelScope.launch { prefs.moveInDock(app.packageName, delta) }
+    }
+
     val recentApps: StateFlow<List<AppInfo>> =
         combine(prefs.launchStats, visibleApps, trackLaunches) { stats, apps, track ->
             if (track) LaunchHistory.recent(stats, apps) else emptyList()
