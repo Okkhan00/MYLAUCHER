@@ -6,6 +6,16 @@ data class ReleaseNote(val version: String, val title: String, val points: List<
 object VersionHistory {
     val releases: List<ReleaseNote> = listOf(
         ReleaseNote(
+            "4.7", "Icon packs, custom icons and a clearer Settings",
+            listOf(
+                "Use an installed icon pack for all app icons, with a clear applied or not-applied status",
+                "Custom Icon Studio: make your own icon for any app from a picture, with crop, shape, background and padding",
+                "Export your custom icons as a My Launcher backup file",
+                "Settings now opens on a dashboard of categories, each with its own page",
+                "Widget picker shows previews, the app name and the size of each widget",
+            ),
+        ),
+        ReleaseNote(
             "4.6", "Customize home screen and drawer",
             listOf(
                 "Customize home screen page with live preview: apps per row, icon size, app names and an optional dock",

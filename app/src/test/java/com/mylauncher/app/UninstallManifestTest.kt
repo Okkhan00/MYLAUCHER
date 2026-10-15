@@ -24,4 +24,12 @@ class UninstallManifestTest {
     fun manifestDoesNotUseBroadPackageVisibility() {
         assertTrue(!manifest().contains("QUERY_ALL_PACKAGES\" />"))
     }
+
+    @Test
+    fun manifestLetsTheLauncherSeeIconPacksOnly() {
+        val text = manifest()
+        assertTrue(text.contains("org.adw.launcher.THEMES"))
+        assertTrue(text.contains("com.novalauncher.THEME"))
+        assertTrue(!text.contains("QUERY_ALL_PACKAGES\" />"))
+    }
 }

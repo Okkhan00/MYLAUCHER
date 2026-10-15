@@ -29,6 +29,8 @@ import com.mylauncher.app.backup.BackupType
 import com.mylauncher.app.widgets.HostedWidget
 import com.mylauncher.app.widgets.WidgetCodec
 import com.mylauncher.app.data.model.SmartSettings
+import com.mylauncher.app.icons.CustomIconCodec
+import com.mylauncher.app.icons.CustomIconDef
 import com.mylauncher.app.launcher.home.DockOps
 import com.mylauncher.app.data.model.folderToken
 import java.io.IOException
@@ -107,6 +109,10 @@ internal object PrefKeys {
     val HOME_SHOW_LABELS = booleanPreferencesKey("home_show_labels")
     val DOCK_COUNT = intPreferencesKey("dock_count")
     val DOCK = stringPreferencesKey("dock")
+
+    // V4.7: icon pack choice and custom icon styles (the pictures themselves are files in private storage)
+    val ICON_PACK = stringPreferencesKey("icon_pack")
+    val CUSTOM_ICONS = stringPreferencesKey("custom_icons")
 
     // Widgets: placed widgets, and an id that was allocated but not yet confirmed (cleaned up on next start)
     val WIDGETS = stringPreferencesKey("widgets")
@@ -266,6 +272,33 @@ class LauncherPreferences(private val store: DataStore<Preferences>) {
                 )
             }
         }
+    }
+
+    // ---- Icon packs and custom icons (V4.7) ------------------------------------------------
+
+    /** The chosen icon pack's package name, or null for the original icons. */
+    val iconPack: Flow<String?> = data.map { p -> p[PrefKeys.ICON_PACK]?.takeIf { it.isNotBlank() } }
+
+    val customIcons: Flow<Map<String, CustomIconDef>> = data.map { CustomIconCodec.decode(it[PrefKeys.CUSTOM_ICONS]) }
+
+    suspend fun setIconPack(packageName: String?) {
+        store.edit { p -> p[PrefKeys.ICON_PACK] = packageName.orEmpty() }
+    }
+
+    suspend fun setCustomIcon(packageName: String, def: CustomIconDef) {
+        store.edit { p ->
+            p[PrefKeys.CUSTOM_ICONS] = CustomIconCodec.encode(CustomIconCodec.decode(p[PrefKeys.CUSTOM_ICONS]) + (packageName to def))
+        }
+    }
+
+    suspend fun removeCustomIcon(packageName: String) {
+        store.edit { p ->
+            p[PrefKeys.CUSTOM_ICONS] = CustomIconCodec.encode(CustomIconCodec.decode(p[PrefKeys.CUSTOM_ICONS]) - packageName)
+        }
+    }
+
+    suspend fun clearCustomIcons() {
+        store.edit { p -> p[PrefKeys.CUSTOM_ICONS] = "" }
     }
 
     // ---- Dock (V4.6) ------------------------------------------------------------------------

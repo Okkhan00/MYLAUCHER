@@ -97,6 +97,90 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
             HomeEntry.resolve(apps, tokens, hidden, folderList)
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    // ---- V4.7: icon packs and custom icons -------------------------------------------------
+
+    val iconPackState: StateFlow<com.mylauncher.app.icons.IconPackState> = repository.packState
+
+    val customIcons: StateFlow<Map<String, com.mylauncher.app.icons.CustomIconDef>> =
+        prefs.customIcons.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
+
+    val customIconStore get() = repository.customIconStore
+
+    init {
+        // The saved choices drive the one icon pipeline that every screen uses.
+        viewModelScope.launch { prefs.customIcons.collect { repository.setCustomIcons(it) } }
+        viewModelScope.launch { prefs.iconPack.distinctUntilChanged().collect { repository.applyIconPack(it) } }
+    }
+
+    fun discoverIconPacks(): List<com.mylauncher.app.icons.IconPackInfo> = repository.iconPacks.discover()
+
+    fun selectIconPack(packageName: String?) {
+        viewModelScope.launch { prefs.setIconPack(packageName) }
+    }
+
+    fun iconSourceOf(app: AppInfo): com.mylauncher.app.icons.IconSourceKind = repository.iconSourceOf(app)
+
+    /** Saves the cropped picture first, then the style, so a failed write never leaves a style without a picture. */
+    fun saveCustomIcon(app: AppInfo, picture: android.graphics.Bitmap, def: com.mylauncher.app.icons.CustomIconDef, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) { repository.customIconStore.save(app.packageName, picture) }
+            if (ok) prefs.setCustomIcon(app.packageName, def)
+            onDone(ok)
+        }
+    }
+
+    /** Only the style changes (shape, color, padding); the saved picture stays. */
+    fun updateCustomIconStyle(app: AppInfo, def: com.mylauncher.app.icons.CustomIconDef) {
+        viewModelScope.launch { prefs.setCustomIcon(app.packageName, def) }
+    }
+
+    fun resetCustomIcon(app: AppInfo) {
+        viewModelScope.launch {
+            prefs.removeCustomIcon(app.packageName)
+            withContext(Dispatchers.IO) { repository.customIconStore.delete(app.packageName) }
+        }
+    }
+
+    /**
+     * Writes the user's own custom icons and their styles into a ZIP at a place the user chose (the system file
+     * dialog never overwrites silently). This is a My Launcher backup, not an installable Android icon pack.
+     * [onDone] gets the number of icons written, or -1 when it failed.
+     */
+    fun exportCustomIcons(uri: Uri, onDone: (Int) -> Unit) {
+        viewModelScope.launch {
+            val written = withContext(Dispatchers.IO) {
+                try {
+                    val defs = customIcons.value
+                    val store = repository.customIconStore
+                    val files = defs.keys.mapNotNull { pkg -> store.readBytes(pkg)?.let { pkg to it } }
+                    val usable = defs.filterKeys { key -> files.any { it.first == key } }
+                    val out = getApplication<Application>().contentResolver.openOutputStream(uri) ?: return@withContext -1
+                    java.util.zip.ZipOutputStream(out).use { zip ->
+                        zip.putNextEntry(java.util.zip.ZipEntry("manifest.json"))
+                        zip.write(com.mylauncher.app.icons.IconExport.manifest(usable, System.currentTimeMillis()).toByteArray())
+                        zip.closeEntry()
+                        for ((pkg, bytes) in files) {
+                            zip.putNextEntry(java.util.zip.ZipEntry("icons/" + com.mylauncher.app.icons.IconExport.safeFileName(pkg)))
+                            zip.write(bytes)
+                            zip.closeEntry()
+                        }
+                    }
+                    files.size
+                } catch (e: Exception) {
+                    -1
+                }
+            }
+            onDone(written)
+        }
+    }
+
+    fun resetAllCustomIcons() {
+        viewModelScope.launch {
+            prefs.clearCustomIcons()
+            withContext(Dispatchers.IO) { repository.customIconStore.deleteAll() }
+        }
+    }
+
     // ---- V4.6: dock ---------------------------------------------------------------------------
 
     val dockIds: StateFlow<List<String>> =

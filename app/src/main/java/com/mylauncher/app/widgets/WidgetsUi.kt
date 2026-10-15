@@ -7,6 +7,18 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.BoxWithConstraints
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.core.graphics.drawable.toBitmap
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.runtime.produceState
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -126,11 +138,11 @@ fun WidgetPickerDialog(controller: WidgetController, onPick: (AppWidgetProviderI
         title = { Text("Add widget") },
         text = {
             if (providers.isEmpty()) {
-                Text("No widgets are available on this device.")
+                Text("No widgets are available on this device. Widgets come from your installed apps.")
             } else {
-                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                LazyColumn(Modifier.heightIn(max = 460.dp)) {
                     items(providers, key = { it.provider.flattenToString() }) { info ->
-                        MenuItem(controller.label(info)) { onPick(info); onDismiss() }
+                        WidgetPickerRow(controller, info) { onPick(info); onDismiss() }
                     }
                 }
             }
@@ -138,6 +150,63 @@ fun WidgetPickerDialog(controller: WidgetController, onPick: (AppWidgetProviderI
         confirmButton = {},
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** One widget in the picker: preview (when the provider supplies one), name, app name and size. */
+@Composable
+private fun WidgetPickerRow(controller: WidgetController, info: AppWidgetProviderInfo, onClick: () -> Unit) {
+    val context = LocalContext.current
+    val preview by produceState<ImageBitmap?>(null, info.provider) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                info.loadPreviewImage(context, 0)?.toBitmap(240, 150)?.asImageBitmap()
+            } catch (e: Exception) {
+                null // missing or broken preview: the row simply has no picture
+            }
+        }
+    }
+    val appName = remember(info.provider) {
+        try {
+            val pm = context.packageManager
+            pm.getApplicationLabel(pm.getApplicationInfo(info.provider.packageName, 0)).toString()
+        } catch (e: Exception) {
+            info.provider.packageName
+        }
+    }
+    val size = remember(info.provider) { WidgetSizeText.describe(info) }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 72.dp).clickable(onClick = onClick).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        val image = preview
+        if (image != null) {
+            Image(image, contentDescription = null, modifier = Modifier.size(width = 96.dp, height = 60.dp))
+        } else {
+            Box(Modifier.size(width = 96.dp, height = 60.dp), contentAlignment = Alignment.Center) { Text("🧩") }
+        }
+        Column(Modifier.weight(1f)) {
+            Text(controller.label(info), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+            Text(appName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            Text(size, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Short text for a widget's size and whether it can be resized, from what the widget provider declares. */
+object WidgetSizeText {
+    fun describe(info: AppWidgetProviderInfo): String {
+        val parts = ArrayList<String>()
+        val cellsW = if (android.os.Build.VERSION.SDK_INT >= 31) info.targetCellWidth else 0
+        val cellsH = if (android.os.Build.VERSION.SDK_INT >= 31) info.targetCellHeight else 0
+        if (cellsW > 0 && cellsH > 0) parts += "$cellsW × $cellsH cells"
+        else if (info.minWidth > 0 && info.minHeight > 0) parts += "at least ${dp(info.minWidth)} × ${dp(info.minHeight)} dp"
+        parts += if (info.resizeMode != AppWidgetProviderInfo.RESIZE_NONE) "resizable" else "fixed size"
+        return parts.joinToString(" · ")
+    }
+
+    private fun dp(px: Int): Int =
+        (px / android.content.res.Resources.getSystem().displayMetrics.density).toInt()
 }
 
 /** The widgets area shown on the home screen. Each widget has a small menu for move, resize and remove. */

@@ -16,6 +16,15 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import com.mylauncher.app.data.model.AppInfo
 import com.mylauncher.app.data.model.IconSize
+import com.mylauncher.app.icons.CustomIconDef
+import com.mylauncher.app.icons.CustomIconRenderer
+import com.mylauncher.app.icons.CustomIconStore
+import com.mylauncher.app.icons.IconPackLoader
+import com.mylauncher.app.icons.IconPackState
+import com.mylauncher.app.icons.IconPrecedence
+import com.mylauncher.app.icons.IconSourceKind
+import com.mylauncher.app.icons.LoadedIconPack
+import com.mylauncher.app.icons.PackLoadResult
 import com.mylauncher.app.performance.PerformanceProfile
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -34,6 +43,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Reads launchable apps from PackageManager and keeps them fresh, and owns the icon cache.
@@ -67,6 +77,67 @@ class AppRepository(context: Context) {
         override fun sizeOf(key: String, value: ImageBitmap): Int = value.width * value.height * 4
     }
     private val inFlight = ConcurrentHashMap<String, Deferred<ImageBitmap?>>()
+
+    // ---- icon pack and custom icons (V4.7) ----------------------------------------------------
+    // Precedence for every icon on every screen: the user's own icon, then the chosen icon pack, then the app's icon.
+    val iconPacks = IconPackLoader(appContext)
+    val customIconStore = CustomIconStore(appContext)
+    @Volatile private var customDefs: Map<String, CustomIconDef> = emptyMap()
+    @Volatile private var loadedPack: LoadedIconPack? = null
+    @Volatile private var desiredPack: String? = null
+    private val _packState = MutableStateFlow(IconPackState())
+    val packState: StateFlow<IconPackState> = _packState.asStateFlow()
+
+    /** The user's custom icon styles changed: only the icons that changed are dropped and redrawn. */
+    fun setCustomIcons(defs: Map<String, CustomIconDef>) {
+        val old = customDefs
+        customDefs = defs
+        val changed = (old.keys + defs.keys).filter { old[it] != defs[it] }
+        if (changed.isNotEmpty()) {
+            changed.forEach { iconCache.remove(it) }
+            iconEpoch.intValue++
+        }
+    }
+
+    /** Switches the icon pack ([packageName] null means the original icons). Everything is redrawn afterwards. */
+    suspend fun applyIconPack(packageName: String?) {
+        desiredPack = packageName
+        reloadIconPack()
+    }
+
+    private suspend fun reloadIconPack() = withContext(Dispatchers.IO) {
+        val want = desiredPack
+        if (want == null) {
+            loadedPack = null
+            _packState.value = IconPackState()
+        } else {
+            when (val result = iconPacks.load(want)) {
+                is PackLoadResult.Loaded -> {
+                    loadedPack = result.pack
+                    _packState.value = IconPackState(want, applied = true, mappedApps = result.pack.mapping.size, label = packLabel(want))
+                }
+                is PackLoadResult.Failed -> {
+                    loadedPack = null
+                    _packState.value = IconPackState(want, applied = false, message = result.message, label = packLabel(want))
+                }
+            }
+        }
+        iconCache.evictAll()
+        iconEpoch.intValue++
+    }
+
+    private fun packLabel(packageName: String): String? = try {
+        pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0)).toString()
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Where this app's icon really comes from right now. */
+    fun iconSourceOf(app: AppInfo): IconSourceKind {
+        val pack = loadedPack
+        val inPack = pack != null && pack.mapping.drawableFor(app.packageName, app.activityName) != null
+        return IconPrecedence.resolve(customDefs.containsKey(app.packageName) && customIconStore.exists(app.packageName), inPack)
+    }
     private var prefetchJob: Job? = null
 
     // ---- app list --------------------------------------------------------------------------
@@ -198,6 +269,8 @@ class AppRepository(context: Context) {
 
     /** Re-reads just [packageName] (debounced). Several broadcasts for one install arrive together. */
     fun packageMayHaveChanged(packageName: String, immediate: Boolean = false) {
+        // The chosen icon pack was installed, updated or removed: read it again (or fall back to original icons).
+        if (packageName == desiredPack) scope.launch { reloadIconPack() }
         pending.add(packageName)
         launchRefresh(if (immediate) 0L else debounceMs)
     }
@@ -348,14 +421,39 @@ class AppRepository(context: Context) {
     }
 
     private fun decodeIcon(app: AppInfo): ImageBitmap? = try {
-        // Adaptive icons are drawn into a bitmap of the size actually needed on this screen.
-        pm.getActivityIcon(ComponentName(app.packageName, app.activityName)).toBitmap(iconPx, iconPx).asImageBitmap()
+        customIcon(app) ?: packIcon(app) ?: originalIcon(app)
     } catch (e: OutOfMemoryError) {
         iconCache.evictAll()
         null
     } catch (e: Exception) {
         null // uninstalled or broken icon: the UI shows its letter placeholder
     }
+
+    private fun customIcon(app: AppInfo): ImageBitmap? {
+        val def = customDefs[app.packageName] ?: return null
+        val picture = customIconStore.load(app.packageName) ?: return null
+        return try {
+            CustomIconRenderer.render(picture, def, iconPx).asImageBitmap()
+        } catch (e: Exception) {
+            null // a broken custom picture falls back to the pack or the original icon
+        } finally {
+            picture.recycle()
+        }
+    }
+
+    private fun packIcon(app: AppInfo): ImageBitmap? {
+        val pack = loadedPack ?: return null
+        val name = pack.mapping.drawableFor(app.packageName, app.activityName) ?: return null
+        return try {
+            pack.drawable(name)?.toBitmap(iconPx, iconPx)?.asImageBitmap()
+        } catch (e: Exception) {
+            null // a broken pack icon falls back to the original icon
+        }
+    }
+
+    private fun originalIcon(app: AppInfo): ImageBitmap? =
+        // Adaptive icons are drawn into a bitmap of the size actually needed on this screen.
+        pm.getActivityIcon(ComponentName(app.packageName, app.activityName)).toBitmap(iconPx, iconPx).asImageBitmap()
 
     /** Warms the cache once, one icon at a time, so scrolling the drawer reads memory instead of PackageManager. */
     private fun prefetchIcons(list: List<AppInfo>) {

@@ -61,7 +61,10 @@ import com.mylauncher.app.launcher.setup.rememberDefaultLauncherController
 import com.mylauncher.app.security.LockScreen
 import com.mylauncher.app.security.biometric.BiometricHelper
 import com.mylauncher.app.settings.CategoriesScreen
+import com.mylauncher.app.settings.CustomIconsScreen
 import com.mylauncher.app.settings.CustomizeDrawerScreen
+import com.mylauncher.app.settings.IconPacksScreen
+import com.mylauncher.app.settings.SettingsSection
 import com.mylauncher.app.settings.CustomizeHomeScreen
 import com.mylauncher.app.settings.HiddenAppsScreen
 import com.mylauncher.app.settings.SecurityScreen
@@ -84,6 +87,8 @@ enum class Screen(val parent: Screen?) {
     CATEGORIES(SETTINGS),
     INSIGHTS(SETTINGS),
     CUSTOMIZE_HOME(SETTINGS),
+    ICON_PACKS(SETTINGS),
+    CUSTOM_ICONS(SETTINGS),
     CUSTOMIZE_DRAWER(SETTINGS),
     THEMES(SETTINGS),
     WALLPAPER(SETTINGS),
@@ -100,7 +105,7 @@ internal fun requiresUnlock(screen: Screen, security: SecuritySettings): Boolean
     return when (screen) {
         Screen.SETTINGS, Screen.SETUP, Screen.CATEGORIES, Screen.INSIGHTS,
         Screen.THEMES, Screen.WALLPAPER, Screen.APP_LOCK, Screen.BACKUP, Screen.DASHBOARD, Screen.TIMER,
-        Screen.CUSTOMIZE_HOME, Screen.CUSTOMIZE_DRAWER -> security.protectSettings
+        Screen.CUSTOMIZE_HOME, Screen.CUSTOMIZE_DRAWER, Screen.ICON_PACKS, Screen.CUSTOM_ICONS -> security.protectSettings
         Screen.HIDDEN, Screen.PRIVATE -> security.protectHidden
         Screen.SECURITY -> true
         Screen.HOME, Screen.DRAWER -> false
@@ -141,6 +146,12 @@ fun LauncherApp(vm: LauncherViewModel) {
     val scope = rememberCoroutineScope()
     // Settings keeps its scroll position while a section is open and when a switch changes how screens are shown.
     val settingsScroll = rememberScrollState()
+    // One scroll position per Settings category page, so coming back from a sub-screen lands where you were.
+    val sectionScrolls = SettingsSection.entries.map { rememberScrollState() }
+    var settingsSectionName by rememberSaveable { mutableStateOf<String?>(null) }
+    val settingsSection = SettingsSection.fromName(settingsSectionName)
+    val iconPackState by vm.iconPackState.collectAsStateWithLifecycle()
+    val customIcons by vm.customIcons.collectAsStateWithLifecycle()
     val widgetController = vm.widgetController
     var showWidgetPicker by remember { mutableStateOf(false) }
 
@@ -182,6 +193,7 @@ fun LauncherApp(vm: LauncherViewModel) {
     LaunchedEffect(screen) {
         if (screen == Screen.HOME || screen == Screen.DRAWER) vm.relock()
         if (screen != Screen.TIMER) vm.relockTimer()
+        if (screen == Screen.HOME || screen == Screen.DRAWER) settingsSectionName = null // Settings opens on the dashboard
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.relock(); vm.relockTimer(); pendingLaunch = null; timerGate = null; pendingBulkUnlock = null }
 
@@ -235,6 +247,10 @@ fun LauncherApp(vm: LauncherViewModel) {
         CompositionLocalProvider(LocalIconSource provides iconSource) {
             BackHandler(enabled = s.onboardingDone && screen.parent != null) {
                 screen.parent?.let { screen = it }
+            }
+            // Inside a Settings category page, Back goes to the dashboard first.
+            BackHandler(enabled = s.onboardingDone && screen == Screen.SETTINGS && settingsSection != null) {
+                settingsSectionName = null
             }
             BackHandler(enabled = timerGate != null) { timerGate = null; screen = Screen.HOME }
 
@@ -523,7 +539,7 @@ fun LauncherApp(vm: LauncherViewModel) {
                             controller = controller,
                             hiddenCount = hiddenIds.size,
                             lockEnabled = sec.lockEnabled,
-                            onBack = { screen = Screen.HOME },
+                            onBack = { if (settingsSection != null) settingsSectionName = null else screen = Screen.HOME },
                             onOpenHidden = { screen = Screen.HIDDEN },
                             onOpenSetup = { screen = Screen.SETUP },
                             onOpenSecurity = { screen = Screen.SECURITY },
@@ -547,7 +563,34 @@ fun LauncherApp(vm: LauncherViewModel) {
                             onOpenTimer = { screen = Screen.TIMER },
                             onOpenCustomizeHome = { screen = Screen.CUSTOMIZE_HOME },
                             onOpenCustomizeDrawer = { screen = Screen.CUSTOMIZE_DRAWER },
+                            section = settingsSection,
+                            onOpenSection = { settingsSectionName = it.name },
+                            sectionScrolls = sectionScrolls,
+                            widgetCount = hostedWidgets.size,
+                            onAddWidget = { showWidgetPicker = true; screen = Screen.HOME },
+                            onOpenIconPacks = { screen = Screen.ICON_PACKS },
+                            onOpenCustomIcons = { screen = Screen.CUSTOM_ICONS },
+                            iconPackSummary = if (iconPackState.applied) iconPackState.label ?: "Icon pack" else "Original",
+                            customIconCount = customIcons.size,
                             scrollState = settingsScroll,
+                        )
+                        Screen.ICON_PACKS -> IconPacksScreen(
+                            state = iconPackState,
+                            discover = vm::discoverIconPacks,
+                            onSelect = vm::selectIconPack,
+                            onBack = { screen = Screen.SETTINGS },
+                        )
+                        Screen.CUSTOM_ICONS -> CustomIconsScreen(
+                            apps = visibleApps,
+                            defs = customIcons,
+                            store = vm.customIconStore,
+                            sourceOf = vm::iconSourceOf,
+                            packLabel = if (iconPackState.applied) iconPackState.desired else null,
+                            onSave = vm::saveCustomIcon,
+                            onReset = vm::resetCustomIcon,
+                            onResetAll = vm::resetAllCustomIcons,
+                            onExport = vm::exportCustomIcons,
+                            onBack = { screen = Screen.SETTINGS },
                         )
                         Screen.CUSTOMIZE_HOME -> CustomizeHomeScreen(
                             settings = s,
