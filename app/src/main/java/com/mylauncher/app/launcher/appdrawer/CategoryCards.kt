@@ -5,7 +5,16 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -121,3 +130,52 @@ fun PageIndicator(index: Int, total: Int, modifier: Modifier = Modifier) {
 }
 
 private const val MAX_DOTS = 14
+
+/**
+ * The compact floating category dock: "All" plus one chip per category. It is only as wide as its chips (and never
+ * wider than a phone-sized pill), scrolls sideways when there are many, and keeps the chosen chip in view.
+ */
+@Composable
+fun CategoryDock(labels: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(selected, labels.size) {
+        if (selected in labels.indices && listState.layoutInfo.visibleItemsInfo.none { it.index == selected }) {
+            listState.animateScrollToItem(selected)
+        }
+    }
+    Surface(
+        modifier = modifier.padding(horizontal = 16.dp).widthIn(max = 460.dp),
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+    ) {
+        LazyRow(
+            state = listState,
+            contentPadding = PaddingValues(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            itemsIndexed(labels) { index, label ->
+                val active = index == selected
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                        .selectable(selected = active, role = Role.Tab, onClick = { onSelect(index) })
+                        .heightIn(min = 44.dp)
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}

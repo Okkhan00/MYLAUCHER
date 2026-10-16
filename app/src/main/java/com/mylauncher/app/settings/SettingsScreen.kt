@@ -227,11 +227,11 @@ fun SettingsScreen(
                 if (section == SettingsSection.DRAWER) {
                     SettingsGroup("App drawer and categories", "📱") {
                         SettingChoice(
-                            "Open the drawer in",
-                            listOf(true to "Categories", false to "All Apps"),
+                            "Category dock",
+                            listOf(true to "Show dock", false to "All Apps only"),
                             smart.groupDrawerByCategory,
                             { onSmartChange(smart.copy(groupDrawerByCategory = it)) },
-                            subtitle = "You can also switch at the top of the drawer. Categories shows one category at a time: swipe sideways to change.",
+                            subtitle = "A small floating dock at the bottom of the drawer: All plus your categories. Swipe sideways or tap a chip to change.",
                         )
                         SettingDivider()
                         SettingRow(

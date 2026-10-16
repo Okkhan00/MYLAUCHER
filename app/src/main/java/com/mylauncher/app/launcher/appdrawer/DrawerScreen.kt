@@ -50,6 +50,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -143,13 +145,13 @@ fun DrawerScreen(
     var openCategoryId by rememberSaveable { mutableStateOf<String?>(null) }
     val grouped = smart.groupDrawerByCategory && !searching
     val groupIds = remember(categoryGroups) { categoryGroups.map { it.entry.category.id } }
-    val pagerState = rememberPagerState(initialPage = groupIds.indexOf(openCategoryId).coerceAtLeast(0)) { groupIds.size }
+    // Page 0 is "All" (every app, A-Z); the pages after it are the categories shown in the floating dock.
+    val pagerState = rememberPagerState(initialPage = (groupIds.indexOf(openCategoryId) + 1).coerceAtLeast(0)) { groupIds.size + 1 }
     LaunchedEffect(groupIds) {
-        val index = groupIds.indexOf(openCategoryId)
-        if (index >= 0 && index != pagerState.currentPage) pagerState.scrollToPage(index)
-        snapshotFlow { pagerState.settledPage }.collect { page -> groupIds.getOrNull(page)?.let { openCategoryId = it } }
+        val index = groupIds.indexOf(openCategoryId) + 1
+        if (index != pagerState.currentPage && index < groupIds.size + 1) pagerState.scrollToPage(index)
+        snapshotFlow { pagerState.settledPage }.collect { page -> openCategoryId = if (page == 0) null else groupIds.getOrNull(page - 1) }
     }
-    var showCategoryJump by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     // Plain A-Z list used by the alphabet index and the non-search views (search has its own results).
     val results = apps
@@ -199,6 +201,10 @@ fun DrawerScreen(
     val iconSize = settings.iconSize.sizeDp.dp
     val gridState = rememberLazyGridState()
     val listState = rememberLazyListState()
+    // The floating category dock exists only in Categories mode and when there is at least one category.
+    val showDock = grouped && categoryGroups.isNotEmpty()
+    val onAllPage = !showDock || pagerState.currentPage == 0
+    val currentGroup = if (showDock) categoryGroups.getOrNull(pagerState.currentPage - 1) else null
 
     // The wallpaper overlay only shows through when the drawer is translucent and the user enabled it.
     Box(Modifier.fillMaxSize().background(wallpaperScrim)) {
@@ -209,11 +215,7 @@ fun DrawerScreen(
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
             if (selecting) {
                 // Listed apps are what "Select all" means: the open category, or the whole All Apps list.
-                val listed = if (smart.groupDrawerByCategory) {
-                    categoryGroups.getOrNull(pagerState.currentPage)?.apps.orEmpty()
-                } else {
-                    results
-                }
+                val listed = if (showDock && pagerState.currentPage > 0) currentGroup?.apps.orEmpty() else results
                 val listedIds = remember(listed) { listed.map { it.packageName } }
                 SelectionTopBar(
                     count = selection.count,
@@ -228,10 +230,7 @@ fun DrawerScreen(
                     onClear = { selection = BulkSelection() },
                     onCancel = exitSelection,
                 )
-            } else Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            } else {
                 val trailing: (@Composable () -> Unit)? = if (query.isNotEmpty()) {
                     {
                         IconButton(onClick = { query = "" }) {
@@ -241,42 +240,68 @@ fun DrawerScreen(
                 } else {
                     null
                 }
+                val searchShape = LocalSearchBarShape.current
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp)
+                        .shadow(3.dp, searchShape)
+                        .focusRequester(focusRequester),
                     singleLine = true,
-                    shape = LocalSearchBarShape.current,
+                    shape = searchShape,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                    ),
                     placeholder = { Text(if (smart.webSearchEnabled || smart.searchSettingsShortcuts) "Search apps, settings and more" else "Search apps") },
                     leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     trailingIcon = trailing,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { searchResults.firstOrNull()?.let(activate) }),
                 )
-                IconButton(onClick = { enterSelection(null) }) {
-                    Icon(Icons.Default.Check, contentDescription = "Select several apps")
-                }
-                IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Default.Settings, contentDescription = "Launcher settings")
-                }
-            }
-
-            if (!searching && !selecting) {
-                DrawerModeTabs(
-                    categoriesMode = smart.groupDrawerByCategory,
-                    onSelect = { categories ->
-                        onGroupByCategoryChange(categories)
-                    },
-                )
-                if (privateCount > 0) {
-                    TextButton(onClick = onOpenPrivate, modifier = Modifier.padding(horizontal = 8.dp)) {
-                        Text("Private apps ($privateCount)")
+                // What is on screen, how many apps it holds, and the two drawer tools.
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 8.dp, top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    val title = when {
+                        searching -> "SEARCH RESULTS"
+                        currentGroup != null -> currentGroup.entry.displayName.uppercase()
+                        else -> "ALL APPS"
+                    }
+                    val count = when {
+                        searching -> searchResults.size
+                        currentGroup != null -> currentGroup.apps.size
+                        else -> results.size
+                    }
+                    Text(
+                        "$title \u00B7 $count",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { enterSelection(null) }) {
+                        Icon(Icons.Default.Check, contentDescription = "Select several apps")
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Launcher settings")
                     }
                 }
             }
 
+            if (!searching && !selecting && privateCount > 0) {
+                TextButton(onClick = onOpenPrivate, modifier = Modifier.padding(horizontal = 8.dp)) {
+                    Text("Private apps ($privateCount)")
+                }
+            }
+
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                val showIndex = !grouped && query.isEmpty() && results.size >= 24 && maxHeight > 420.dp
+                val showIndex = onAllPage && query.isEmpty() && results.size >= 24 && maxHeight > 420.dp
                 val letters = remember(results) { results.map { firstLetter(it.label) }.distinct() }
                 val firstIndexByLetter = remember(results) {
                     val map = LinkedHashMap<Char, Int>()
@@ -290,10 +315,55 @@ fun DrawerScreen(
                 val showMostUsed = query.isEmpty() && !selecting && mostUsedApps.isNotEmpty() && maxHeight > (if (showSuggested) 880.dp else 720.dp)
 
                 Column(Modifier.fillMaxSize()) {
-                if (showSuggested) ShortcutRow("Suggested", suggestedApps, iconSize, settings.showLabels, onLaunch) { menuApp = it }
+                if (showSuggested) ShortcutRow("Suggested", suggestedApps, iconSize, settings.showLabels, onLaunch, caption = "Frequently used") { menuApp = it }
                 if (showRecent) ShortcutRow("Recently used", recentApps, iconSize, settings.showLabels, onLaunch) { menuApp = it }
                 if (showMostUsed) ShortcutRow("Most used", mostUsedApps, iconSize, settings.showLabels, onLaunch) { menuApp = it }
                 Box(Modifier.weight(1f).fillMaxWidth()) {
+
+                // Every app, A-Z, scrolling, with the alphabet index.
+                val allApps: @Composable () -> Unit = {
+                    if (results.isEmpty()) {
+                        EmptyState(
+                            title = "No apps found",
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else if (settings.drawerLayout == DrawerLayout.GRID) {
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(settings.columns),
+                            state = gridState,
+                            contentPadding = PaddingValues(start = 8.dp, end = endPadding, bottom = 16.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(results, key = { it.packageName }, contentType = { "app" }) { app ->
+                                AppTile(
+                                    app = app,
+                                    iconSize = iconSize,
+                                    showLabel = settings.showLabels,
+                                    onClick = { tapApp(app) },
+                                    onLongClick = { holdApp(app) },
+                                    selected = selectedOf(app),
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            contentPadding = PaddingValues(start = 0.dp, end = endPadding - 8.dp, bottom = 16.dp),
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(results, key = { it.packageName }, contentType = { "app" }) { app ->
+                                AppRow(
+                                    app = app,
+                                    iconSize = iconSize,
+                                    showLabel = settings.showLabels,
+                                    onClick = { tapApp(app) },
+                                    onLongClick = { holdApp(app) },
+                                    selected = selectedOf(app),
+                                )
+                            }
+                        }
+                    }
+                }
 
                 if (searching) {
                     SearchResultsList(
@@ -303,106 +373,23 @@ fun DrawerScreen(
                         onActivate = activate,
                         onAppLongClick = { menuApp = it },
                     )
-                } else if (grouped) {
-                    if (categoryGroups.isEmpty()) {
-                        EmptyState(
-                            title = "No categories to show",
-                            subtitle = "All categories are hidden or empty. Switch to All Apps, or change this in Settings > App categories.",
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        HorizontalPager(
-                            state = pagerState,
-                            modifier = Modifier.fillMaxSize(),
-                            key = { groupIds.getOrNull(it) ?: it },
-                        ) { page ->
-                            val group = categoryGroups.getOrNull(page)
+                } else if (showDock) {
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                        key = { page -> if (page == 0) "all" else groupIds.getOrNull(page - 1) ?: page },
+                    ) { page ->
+                        if (page == 0) {
+                            allApps()
+                        } else {
+                            val group = categoryGroups.getOrNull(page - 1)
                             if (group != null) {
-                                Column(Modifier.fillMaxSize()) {
-                                    CategoryPageHeader(
-                                        entry = group.entry,
-                                        appCount = group.apps.size,
-                                        index = page,
-                                        total = categoryGroups.size,
-                                        onJump = { showCategoryJump = true },
-                                    )
-                                    if (group.apps.isEmpty()) {
-                                        EmptyState(title = "No apps in this category", modifier = Modifier.fillMaxSize())
-                                    } else if (settings.drawerLayout == DrawerLayout.GRID) {
-                                        LazyVerticalGrid(
-                                            columns = GridCells.Fixed(settings.columns),
-                                            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 16.dp),
-                                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                                        ) {
-                                            items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
-                                                AppTile(
-                                                    app = app,
-                                                    iconSize = iconSize,
-                                                    showLabel = settings.showLabels,
-                                                    onClick = { tapApp(app) },
-                                                    onLongClick = { holdApp(app) },
-                                                    selected = selectedOf(app),
-                                                )
-                                            }
-                                        }
-                                    } else {
-                                        LazyColumn(contentPadding = PaddingValues(bottom = 16.dp), modifier = Modifier.weight(1f).fillMaxWidth()) {
-                                            items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
-                                                AppRow(
-                                                    app = app,
-                                                    iconSize = iconSize,
-                                                    showLabel = settings.showLabels,
-                                                    onClick = { tapApp(app) },
-                                                    onLongClick = { holdApp(app) },
-                                                    selected = selectedOf(app),
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                CategoryPage(group, settings, iconSize, tapApp, holdApp, selectedOf)
                             }
                         }
                     }
-                } else if (results.isEmpty()) {
-                    EmptyState(
-                        title = "No apps found",
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else if (settings.drawerLayout == DrawerLayout.GRID) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(settings.columns),
-                        state = gridState,
-                        contentPadding = PaddingValues(start = 8.dp, end = endPadding, bottom = 16.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(results, key = { it.packageName }, contentType = { "app" }) { app ->
-                            AppTile(
-                                app = app,
-                                iconSize = iconSize,
-                                showLabel = settings.showLabels,
-                                onClick = { tapApp(app) },
-                                onLongClick = { holdApp(app) },
-                                selected = selectedOf(app),
-                            )
-                        }
-                    }
                 } else {
-                    LazyColumn(
-                        state = listState,
-                        contentPadding = PaddingValues(start = 0.dp, end = endPadding - 8.dp, bottom = 16.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        items(results, key = { it.packageName }, contentType = { "app" }) { app ->
-                            AppRow(
-                                app = app,
-                                iconSize = iconSize,
-                                showLabel = settings.showLabels,
-                                onClick = { tapApp(app) },
-                                onLongClick = { holdApp(app) },
-                                selected = selectedOf(app),
-                            )
-                        }
-                    }
+                    allApps()
                 }
 
                 if (showIndex) {
@@ -427,6 +414,16 @@ fun DrawerScreen(
                 }
             }
 
+            if (showDock && !selecting) {
+                // Compact, centered and always below the app area, so it never covers an icon.
+                CategoryDock(
+                    labels = listOf("All") + categoryGroups.map { it.entry.displayName },
+                    selected = pagerState.currentPage,
+                    onSelect = { page -> scope.launch { pagerState.animateScrollToPage(page) } },
+                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp, bottom = 10.dp),
+                )
+            }
+
             if (selecting) {
                 val selectedApps = remember(selection, apps) {
                     val byPackage = apps.associateBy { it.packageName }
@@ -446,33 +443,56 @@ fun DrawerScreen(
             onSelect = { enterSelection(app) },
         )
     }
+}
 
-    if (showCategoryJump) {
-        AlertDialog(
-            onDismissRequest = { showCategoryJump = false },
-            title = { Text("Go to category") },
-            text = {
-                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                    categoryGroups.forEachIndexed { i, group ->
-                        Text(
-                            "${CategoryVisuals.emoji(group.entry)}  ${group.entry.displayName} (${group.apps.size})",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 48.dp)
-                                .clickable {
-                                    showCategoryJump = false
-                                    scope.launch { pagerState.animateScrollToPage(i) }
-                                }
-                                .padding(vertical = 12.dp, horizontal = 4.dp),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (i == pagerState.currentPage) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
+/** One category: a few apps, sitting at the bottom of the app area where a thumb reaches them, above the dock. */
+@Composable
+private fun CategoryPage(
+    group: CategoryGroup,
+    settings: LauncherSettings,
+    iconSize: androidx.compose.ui.unit.Dp,
+    tapApp: (AppInfo) -> Unit,
+    holdApp: (AppInfo) -> Unit,
+    selectedOf: (AppInfo) -> Boolean?,
+) {
+    Box(Modifier.fillMaxSize()) {
+        if (group.apps.isEmpty()) {
+            EmptyState(title = "No apps in this category", modifier = Modifier.fillMaxSize())
+        } else if (settings.drawerLayout == DrawerLayout.GRID) {
+            // The grid only takes the height it needs (up to the whole area), so a short list sits at the bottom.
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(settings.columns),
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) {
+                items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
+                    AppTile(
+                        app = app,
+                        iconSize = iconSize,
+                        showLabel = settings.showLabels,
+                        onClick = { tapApp(app) },
+                        onLongClick = { holdApp(app) },
+                        selected = selectedOf(app),
+                    )
                 }
-            },
-            confirmButton = {},
-            dismissButton = { TextButton(onClick = { showCategoryJump = false }) { Text("Close") } },
-        )
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(vertical = 8.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            ) {
+                items(group.apps, key = { it.packageName }, contentType = { "app" }) { app ->
+                    AppRow(
+                        app = app,
+                        iconSize = iconSize,
+                        showLabel = settings.showLabels,
+                        onClick = { tapApp(app) },
+                        onLongClick = { holdApp(app) },
+                        selected = selectedOf(app),
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -483,15 +503,25 @@ private fun ShortcutRow(
     iconSize: androidx.compose.ui.unit.Dp,
     showLabels: Boolean,
     onLaunch: (AppInfo) -> Unit,
+    caption: String? = null,
     onLongPress: (AppInfo) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
+        Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.Bottom) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            if (caption != null) {
+                Text(
+                    caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp),
+                )
+            }
+        }
         LazyRow(contentPadding = PaddingValues(horizontal = 8.dp)) {
             items(apps, key = { it.packageName }) { app ->
                 AppTile(

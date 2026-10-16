@@ -3,7 +3,18 @@ package com.mylauncher.app.launcher.home
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -211,9 +222,11 @@ fun HomeScreen(
         val dockRow: @Composable (Modifier) -> Unit = { dockModifier ->
             if (settings.dockCount > 0) {
                 Surface(
-                    shape = MaterialTheme.shapes.extraLarge,
-                    color = Color.White.copy(alpha = 0.16f),
-                    modifier = dockModifier.fillMaxWidth(),
+                    // A compact floating pill sized to its apps, not a bar across the whole screen.
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.2f),
+                    shadowElevation = 6.dp,
+                    modifier = dockModifier,
                 ) {
                     if (dockApps.isEmpty()) {
                         Text(
@@ -223,8 +236,8 @@ fun HomeScreen(
                         )
                     } else {
                         Row(
-                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             dockApps.forEach { app ->
                                 AppTile(
@@ -255,7 +268,22 @@ fun HomeScreen(
             if (reorderMode) {
                 Button(onClick = { reorderMode = false }, modifier = modifier.heightIn(min = 48.dp)) { Text("Done") }
             } else {
-                FilledTonalButton(onClick = onOpenDrawer, modifier = modifier.heightIn(min = 48.dp)) { Text("All apps") }
+                // A small chevron: tap (or swipe up) to open the app drawer.
+                Box(
+                    modifier = modifier
+                        .heightIn(min = 48.dp)
+                        .widthIn(min = 64.dp)
+                        .clip(CircleShape)
+                        .clickable(role = Role.Button, onClickLabel = "Open all apps", onClick = onOpenDrawer)
+                        .semantics { contentDescription = "All apps" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Canvas(Modifier.size(width = 22.dp, height = 11.dp)) {
+                        val stroke = 2.5.dp.toPx()
+                        drawLine(Color.White, Offset(stroke / 2, size.height - stroke / 2), Offset(size.width / 2, stroke / 2), stroke, StrokeCap.Round)
+                        drawLine(Color.White, Offset(size.width / 2, stroke / 2), Offset(size.width - stroke / 2, size.height - stroke / 2), stroke, StrokeCap.Round)
+                    }
+                }
             }
         }
 
@@ -268,7 +296,7 @@ fun HomeScreen(
                         SearchPill(onOpenSearch)
                     }
                     widgetsSlot(Modifier.weight(1f))
-                    dockRow(Modifier.padding(bottom = 8.dp))
+                    dockRow(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp))
                     bottomButton(Modifier)
                 }
                 favoritesArea(Modifier.weight(0.55f).fillMaxHeight().verticalScroll(rememberScrollState()))
@@ -283,7 +311,7 @@ fun HomeScreen(
                 widgetsSlot(Modifier.weight(1f))
                 favoritesArea(Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                dockRow(Modifier.padding(bottom = 8.dp))
+                dockRow(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp))
                 bottomButton(Modifier.align(Alignment.CenterHorizontally))
             }
         }

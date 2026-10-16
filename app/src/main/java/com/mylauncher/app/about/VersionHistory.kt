@@ -6,6 +6,15 @@ data class ReleaseNote(val version: String, val title: String, val points: List<
 object VersionHistory {
     val releases: List<ReleaseNote> = listOf(
         ReleaseNote(
+            "4.8", "New drawer design",
+            listOf(
+                "Floating pill search bar and a cleaner All Apps header with the app count",
+                "Compact floating category dock at the bottom: All plus your categories",
+                "Apps of the chosen category sit at the bottom, within thumb reach, above the dock",
+                "Home screen dock is now a small floating pill, with a chevron to open the drawer",
+            ),
+        ),
+        ReleaseNote(
             "4.7", "Icon packs, custom icons and a clearer Settings",
             listOf(
                 "Use an installed icon pack for all app icons, with a clear applied or not-applied status",

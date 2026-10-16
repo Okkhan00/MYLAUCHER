@@ -115,8 +115,8 @@ fun OnboardingScreen(
                                     onThemeChange,
                                 )
                                 SettingChoice(
-                                    "Open the app drawer in",
-                                    listOf(true to "Categories", false to "All Apps"),
+                                    "Category dock",
+                                    listOf(true to "Show dock", false to "All Apps only"),
                                     smart.groupDrawerByCategory,
                                     { onSmartChange(smart.copy(groupDrawerByCategory = it)) },
                                 )
