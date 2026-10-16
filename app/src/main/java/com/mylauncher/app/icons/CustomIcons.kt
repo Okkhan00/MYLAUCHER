@@ -96,8 +96,9 @@ object PictureImport {
                 -1L
             }
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-                ?: return PictureResult.Error("Can't open this picture")
+            val boundsStream = resolver.openInputStream(uri) ?: return PictureResult.Error("Can't open this picture")
+            // Reading only the size returns no bitmap by design, so the result is not checked here.
+            boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
             val problem = IconStudioMath.validate(if (length >= 0) length else 0L, bounds.outWidth, bounds.outHeight)
             if (problem != null) return PictureResult.Error(problem)
             val options = BitmapFactory.Options().apply {
